@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>新增关注内容</h2>
+<form method="post" class="mt-3">
+  <div class="mb-3">
+    <label class="form-label">关注内容（最多50个字符）</label>
+    <input type="text" class="form-control" name="text" maxlength="50" required>
+  </div>
+  <button class="btn btn-primary" type="submit">保存</button>
+  <a class="btn btn-secondary" href="{{ url_for('list_contents') }}">返回</a>
+</form>
+{% endblock %}
