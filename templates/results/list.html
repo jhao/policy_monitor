@@ -1,0 +1,83 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>监控结果</h2>
+<form class="row g-3 mb-4" method="get">
+  <div class="col-md-3">
+    <label class="form-label">任务</label>
+    <select class="form-select" name="task_id">
+      <option value="">全部</option>
+      {% for task in tasks %}
+      <option value="{{ task.id }}" {% if query_args.task_id == task.id|string %}selected{% endif %}>{{ task.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-3">
+    <label class="form-label">网站</label>
+    <select class="form-select" name="website_id">
+      <option value="">全部</option>
+      {% for website in websites %}
+      <option value="{{ website.id }}" {% if query_args.website_id == website.id|string %}selected{% endif %}>{{ website.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-3">
+    <label class="form-label">关注内容</label>
+    <select class="form-select" name="content_id">
+      <option value="">全部</option>
+      {% for content in contents %}
+      <option value="{{ content.id }}" {% if query_args.content_id == content.id|string %}selected{% endif %}>{{ content.text }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-3">
+    <label class="form-label">开始日期</label>
+    <input type="datetime-local" class="form-control" name="start_date" value="{{ query_args.start_date }}">
+  </div>
+  <div class="col-md-3">
+    <label class="form-label">结束日期</label>
+    <input type="datetime-local" class="form-control" name="end_date" value="{{ query_args.end_date }}">
+  </div>
+  <div class="col-md-3 align-self-end">
+    <button class="btn btn-primary" type="submit">筛选</button>
+  </div>
+</form>
+<table class="table table-striped">
+  <thead>
+    <tr>
+      <th>时间</th>
+      <th>任务</th>
+      <th>网站</th>
+      <th>关注内容</th>
+      <th>标题</th>
+      <th>链接</th>
+      <th>相似度</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for result in results %}
+    <tr>
+      <td>{{ result.created_at }}</td>
+      <td>{{ result.task.name }}</td>
+      <td>{{ result.website.name }}</td>
+      <td>{{ result.content.text if result.content else '未知' }}</td>
+      <td>{{ result.link_title or '无标题' }}</td>
+      <td><a href="{{ result.discovered_url }}" target="_blank">打开</a></td>
+      <td>{{ '%.2f'|format(result.similarity_score or 0) }}</td>
+    </tr>
+    {% else %}
+    <tr>
+      <td colspan="7" class="text-center text-muted">暂无记录</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<nav>
+  <ul class="pagination">
+    {% for p in range(1, total_pages + 1) %}
+    <li class="page-item {% if p == page %}active{% endif %}">
+      <a class="page-link" href="{{ url_for('list_results', page=p, **query_args) }}">{{ p }}</a>
+    </li>
+    {% endfor %}
+  </ul>
+</nav>
+{% endblock %}

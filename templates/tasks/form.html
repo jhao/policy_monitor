@@ -1,0 +1,44 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>新增监控任务</h2>
+<form method="post" class="mt-3">
+  <div class="mb-3">
+    <label class="form-label">任务名称</label>
+    <input type="text" class="form-control" name="name" required>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">选择网站</label>
+    <select class="form-select" name="website_id" required>
+      <option value="">请选择</option>
+      {% for website in websites %}
+        <option value="{{ website.id }}">{{ website.name }} ({{ website.interval_minutes }}分钟)</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">通知邮箱</label>
+    <input type="email" class="form-control" name="notification_email" required>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">选择关注内容（可多选）</label>
+    <div class="row">
+      {% for content in contents %}
+      <div class="col-md-4">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" value="{{ content.id }}" id="content{{ content.id }}" name="content_ids">
+          <label class="form-check-label" for="content{{ content.id }}">{{ content.text }}</label>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  <button class="btn btn-primary" type="submit">保存</button>
+  <a class="btn btn-secondary" href="{{ url_for('list_tasks') }}">返回</a>
+</form>
+{% if not websites %}
+<p class="text-muted mt-3">请先配置关注网站。</p>
+{% endif %}
+{% if not contents %}
+<p class="text-muted">请先添加关注内容。</p>
+{% endif %}
+{% endblock %}

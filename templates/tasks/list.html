@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2>监控任务</h2>
+  <a href="{{ url_for('create_task') }}" class="btn btn-primary">新增任务</a>
+</div>
+<table class="table table-striped">
+  <thead>
+    <tr>
+      <th>名称</th>
+      <th>网站</th>
+      <th>关注内容</th>
+      <th>通知邮箱</th>
+      <th>最后执行</th>
+      <th>状态</th>
+      <th>操作</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for task in tasks %}
+    <tr>
+      <td><a href="{{ url_for('view_task', task_id=task.id) }}">{{ task.name }}</a></td>
+      <td>{{ task.website.name if task.website else '未配置' }}</td>
+      <td>
+        {% for content in task.watch_contents %}
+          <span class="badge text-bg-secondary">{{ content.text }}</span>
+        {% endfor %}
+      </td>
+      <td>{{ task.notification_email }}</td>
+      <td>{{ task.last_run_at or '尚未执行' }}</td>
+      <td>{{ '运行中' if task.is_active else '已暂停' }} / {{ task.last_status or '未执行' }}</td>
+      <td>
+        <form action="{{ url_for('toggle_task', task_id=task.id) }}" method="post" class="d-inline">
+          <button class="btn btn-sm btn-warning">{{ '暂停' if task.is_active else '启动' }}</button>
+        </form>
+        <form action="{{ url_for('delete_task', task_id=task.id) }}" method="post" class="d-inline" onsubmit="return confirm('确认删除该任务？');">
+          <button class="btn btn-sm btn-danger">删除</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% if not tasks %}
+<p class="text-muted">当前暂无监控任务，请先创建。</p>
+{% endif %}
+{% endblock %}

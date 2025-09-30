@@ -1,0 +1,68 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>任务详情 - {{ task.name }}</h2>
+<p><strong>网站：</strong> {{ task.website.name if task.website else '未配置' }} / {{ task.website.url if task.website else '' }}</p>
+<p><strong>关注内容：</strong>
+  {% for content in task.watch_contents %}
+    <span class="badge text-bg-secondary">{{ content.text }}</span>
+  {% endfor %}
+</p>
+<p><strong>通知邮箱：</strong> {{ task.notification_email }}</p>
+<p><strong>任务状态：</strong> {{ '运行中' if task.is_active else '已暂停' }}，最近状态：{{ task.last_status or '无' }}</p>
+<p><strong>相似度阈值：</strong> {{ threshold }}</p>
+
+<h3 class="mt-4">最近执行日志</h3>
+<table class="table table-sm table-bordered">
+  <thead>
+    <tr>
+      <th>开始时间</th>
+      <th>结束时间</th>
+      <th>状态</th>
+      <th>信息</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for log in logs %}
+    <tr>
+      <td>{{ log.run_started_at }}</td>
+      <td>{{ log.run_finished_at }}</td>
+      <td>{{ log.status }}</td>
+      <td>{{ log.message }}</td>
+    </tr>
+    {% else %}
+    <tr>
+      <td colspan="4" class="text-center text-muted">暂无日志</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h3 class="mt-4">最近匹配结果</h3>
+<table class="table table-striped">
+  <thead>
+    <tr>
+      <th>时间</th>
+      <th>标题</th>
+      <th>链接</th>
+      <th>匹配关注项</th>
+      <th>相似度</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for result in results %}
+    <tr>
+      <td>{{ result.created_at }}</td>
+      <td>{{ result.link_title or '无标题' }}</td>
+      <td><a href="{{ result.discovered_url }}" target="_blank">打开</a></td>
+      <td>{{ result.content.text if result.content else '未知' }}</td>
+      <td>{{ '%.2f'|format(result.similarity_score or 0) }}</td>
+    </tr>
+    {% else %}
+    <tr>
+      <td colspan="5" class="text-center text-muted">暂无匹配结果</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<a class="btn btn-secondary" href="{{ url_for('list_tasks') }}">返回任务列表</a>
+{% endblock %}
