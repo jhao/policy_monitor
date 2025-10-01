@@ -1,0 +1,59 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>通知配置</h2>
+<p class="text-muted">在此管理邮件和钉钉通知的全局配置，供监控任务使用。</p>
+<div class="row">
+  <div class="col-md-6">
+    <div class="card mb-4">
+      <div class="card-header">SMTP 邮件配置</div>
+      <div class="card-body">
+        <form method="post">
+          <input type="hidden" name="config_type" value="email">
+          <div class="mb-3">
+            <label class="form-label">SMTP 主机</label>
+            <input type="text" class="form-control" name="smtp_host" value="{{ email_setting.smtp_host if email_setting else '' }}" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">SMTP 端口</label>
+            <input type="number" class="form-control" name="smtp_port" value="{{ email_setting.smtp_port if email_setting and email_setting.smtp_port else 587 }}" min="1">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">用户名</label>
+            <input type="text" class="form-control" name="smtp_username" value="{{ email_setting.smtp_username if email_setting else '' }}" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">密码 / 授权码</label>
+            <input type="password" class="form-control" name="smtp_password" value="{{ email_setting.smtp_password if email_setting else '' }}" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">发件人地址</label>
+            <input type="email" class="form-control" name="smtp_sender" value="{{ email_setting.smtp_sender if email_setting else '' }}">
+            <div class="form-text">若为空则默认使用用户名。</div>
+          </div>
+          <div class="form-check form-switch mb-3">
+            <input class="form-check-input" type="checkbox" id="smtpUseTls" name="smtp_use_tls" {% if not email_setting or email_setting.smtp_use_tls %}checked{% endif %}>
+            <label class="form-check-label" for="smtpUseTls">启用 TLS</label>
+          </div>
+          <button class="btn btn-primary" type="submit">保存 SMTP 配置</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card mb-4">
+      <div class="card-header">钉钉机器人配置</div>
+      <div class="card-body">
+        <form method="post">
+          <input type="hidden" name="config_type" value="dingtalk">
+          <div class="mb-3">
+            <label class="form-label">Webhook 地址</label>
+            <input type="url" class="form-control" name="webhook_url" value="{{ dingtalk_setting.webhook_url if dingtalk_setting else '' }}" required>
+          </div>
+          <div class="form-text mb-3">请使用钉钉群机器人提供的自定义机器人 webhook 地址。</div>
+          <button class="btn btn-primary" type="submit">保存钉钉配置</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
