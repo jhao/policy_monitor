@@ -78,10 +78,31 @@ def view_website_snapshot(website_id: int) -> Any:
             flash("未找到网站", "danger")
             return redirect(url_for("list_websites"))
 
-        main_snapshot, subpage_snapshots = parse_snapshot(website.last_snapshot)
-        snapshot_entries: list[dict[str, str]] = subpage_snapshots
-        if not snapshot_entries and main_snapshot:
-            snapshot_entries = [{"url": website.url, "html": main_snapshot}]
+        main_snapshot, subpage_snapshots, main_title = parse_snapshot(website.last_snapshot)
+        snapshot_entries: list[dict[str, str | None]] = []
+        if main_snapshot:
+            snapshot_entries.append(
+                {
+                    "url": website.url,
+                    "html": main_snapshot,
+                    "title": main_title,
+                    "label": "主页面",
+                }
+            )
+
+        for index, entry in enumerate(subpage_snapshots, start=1):
+            if not entry.get("url") or not entry.get("html"):
+                continue
+            snapshot_entries.append(
+                {
+                    "url": entry.get("url"),
+                    "html": entry.get("html"),
+                    "title": entry.get("title"),
+                    "label": f"子链接 {index}",
+                }
+            )
+
+        snapshot_entries = [item for item in snapshot_entries if item.get("url") and item.get("html")]
 
         related_tasks = [
             {"id": task.id, "name": task.name}

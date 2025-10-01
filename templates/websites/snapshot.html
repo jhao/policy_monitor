@@ -20,7 +20,7 @@
   <div class="accordion-item">
     <h2 class="accordion-header" id="{{ heading_id }}">
       <button class="accordion-button{% if not loop.first %} collapsed{% endif %}" type="button" data-bs-toggle="collapse" data-bs-target="#{{ collapse_id }}" aria-expanded="{{ 'true' if loop.first else 'false' }}" aria-controls="{{ collapse_id }}">
-        子链接 {{ loop.index }}：{{ entry.url }}
+        {{ entry.label or ('子链接 ' ~ loop.index) }}：{{ entry.url }}{% if entry.title %}（{{ entry.title }}）{% endif %}
       </button>
     </h2>
     <div id="{{ collapse_id }}" class="accordion-collapse collapse{% if loop.first %} show{% endif %}" aria-labelledby="{{ heading_id }}" data-bs-parent="#snapshot-accordion">
