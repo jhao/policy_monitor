@@ -25,12 +25,22 @@ app.config.update(
 )
 
 scheduler = MonitorScheduler()
+_setup_complete = False
 
 
-@app.before_first_request
-def setup() -> None:
+def ensure_setup() -> None:
+    """Initialize database connections and start the scheduler once."""
+    global _setup_complete
+    if _setup_complete:
+        return
     init_db()
     scheduler.start()
+    _setup_complete = True
+
+
+@app.before_request
+def setup_before_request() -> None:
+    ensure_setup()
 
 
 @app.teardown_appcontext
