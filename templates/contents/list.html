@@ -1,29 +1,86 @@
 {% extends 'base.html' %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h2>关注内容清单</h2>
-  <a href="{{ url_for('create_content') }}" class="btn btn-primary">新增关注内容</a>
+<div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+  <h2 class="mb-0">关注内容清单</h2>
+  {% if selected_category %}
+  <a href="{{ url_for('bulk_edit_category_contents', category_id=selected_category.id) }}" class="btn btn-outline-secondary btn-sm">批量编辑「{{ selected_category.name }}」</a>
+  {% endif %}
+  {% if categories %}
+  <a href="{{ url_for('create_content', category_id=selected_category.id if selected_category else None) }}" class="btn btn-primary ms-auto">新增关注内容</a>
+  {% else %}
+  <span class="text-muted ms-auto">请先创建分类</span>
+  {% endif %}
 </div>
-<table class="table table-striped">
-  <thead>
-    <tr>
-      <th>关注内容</th>
-      <th>创建时间</th>
-      <th>操作</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for content in contents %}
-    <tr>
-      <td>{{ content.text }}</td>
-      <td>{{ content.created_at }}</td>
-      <td>
-        <form action="{{ url_for('delete_content', content_id=content.id) }}" method="post" onsubmit="return confirm('确认删除该关注内容？');">
-          <button class="btn btn-sm btn-danger">删除</button>
-        </form>
-      </td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+
+<div class="card mb-4">
+  <div class="card-header">新增分类</div>
+  <div class="card-body">
+    <form class="row row-cols-lg-auto g-2 align-items-center" method="post" action="{{ url_for('create_content_category') }}">
+      <div class="col">
+        <label for="categoryName" class="visually-hidden">分类名称</label>
+        <input type="text" class="form-control" id="categoryName" name="name" placeholder="请输入分类名称" required>
+      </div>
+      <div class="col">
+        <button class="btn btn-success" type="submit">保存分类</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="d-flex flex-wrap gap-2 mb-4">
+  <a class="btn btn-outline-primary {% if not selected_category %}active{% endif %}" href="{{ url_for('list_contents') }}">全部 <span class="badge text-bg-secondary ms-1">{{ total_count }}</span></a>
+  {% for category in categories %}
+  <div class="btn-group">
+    <a class="btn btn-outline-primary {% if selected_category_id == category.id %}active{% endif %}" href="{{ url_for('list_contents', category_id=category.id) }}">
+      {{ category.name }}
+      <span class="badge text-bg-secondary ms-1">{{ category.contents|length }}</span>
+    </a>
+    <form method="post" action="{{ url_for('delete_content_category', category_id=category.id) }}" onsubmit="return confirm('确认删除该分类？删除前需清空分类下的关注内容。');">
+      <button class="btn btn-outline-primary text-danger" type="submit" title="删除分类">&times;</button>
+    </form>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="card">
+  <div class="card-header">
+    {% if selected_category %}
+      「{{ selected_category.name }}」分类下的关注内容
+    {% else %}
+      全部关注内容
+    {% endif %}
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-striped mb-0">
+        <thead>
+          <tr>
+            <th scope="col">关注内容</th>
+            <th scope="col">分类</th>
+            <th scope="col">创建时间</th>
+            <th scope="col">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for content in contents %}
+          <tr>
+            <td>{{ content.text }}</td>
+            <td>{{ content.category.name }}</td>
+            <td>{{ content.created_at }}</td>
+            <td>
+              <form action="{{ url_for('delete_content', content_id=content.id) }}" method="post" onsubmit="return confirm('确认删除该关注内容？');">
+                <button class="btn btn-sm btn-danger">删除</button>
+              </form>
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="4" class="text-center text-muted py-4">当前分类下暂无关注内容</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
 {% endblock %}

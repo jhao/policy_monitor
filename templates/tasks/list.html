@@ -24,7 +24,7 @@
       <td>{{ task.website.name if task.website else '未配置' }}</td>
       <td>
         {% for content in task.watch_contents %}
-          <span class="badge text-bg-secondary">{{ content.text }}</span>
+          <span class="badge text-bg-secondary">{{ content.category.name if content.category else '未分类' }}：{{ content.text }}</span>
         {% endfor %}
       </td>
       <td>{% if task.notification_method == 'dingtalk' %}钉钉{% else %}邮件{% endif %}</td>

@@ -32,16 +32,33 @@
   </div>
   <div class="mb-3">
     <label class="form-label">选择关注内容（可多选）</label>
-    <div class="row">
-      {% for content in contents %}
-      <div class="col-md-4">
-        <div class="form-check">
-          <input class="form-check-input" type="checkbox" value="{{ content.id }}" id="content{{ content.id }}" name="content_ids" {% if content.id in selected_content_ids %}checked{% endif %}>
-          <label class="form-check-label" for="content{{ content.id }}">{{ content.text }}</label>
+    {% if categories %}
+      {% for category in categories %}
+      <div class="border rounded p-3 mb-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h6 class="mb-0">{{ category.name }}</h6>
+          <a class="small" href="{{ url_for('bulk_edit_category_contents', category_id=category.id) }}">批量编辑</a>
+
         </div>
+        {% if category.contents %}
+        <div class="row g-2">
+          {% for content in category.contents %}
+          <div class="col-md-6 col-lg-4">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" value="{{ content.id }}" id="content{{ content.id }}" name="content_ids">
+              <label class="form-check-label" for="content{{ content.id }}">{{ content.text }}</label>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-muted mb-0 small">该分类下暂无关注内容。</p>
+        {% endif %}
       </div>
       {% endfor %}
-    </div>
+    {% else %}
+    <p class="text-muted mb-0">请先在关注内容清单中创建分类并添加内容。</p>
+    {% endif %}
   </div>
   <button class="btn btn-primary" type="submit">保存</button>
   <a class="btn btn-secondary" href="{{ url_for('list_tasks') }}">返回</a>
@@ -49,8 +66,8 @@
 {% if not websites %}
 <p class="text-muted mt-3">请先配置关注网站。</p>
 {% endif %}
-{% if not contents %}
-<p class="text-muted">请先添加关注内容。</p>
+{% if not has_contents %}
+<p class="text-muted">请先在关注内容清单中维护分类及关注内容。</p>
 {% endif %}
 <script>
   const methodSelect = document.getElementById('notificationMethod');

@@ -13,6 +13,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -41,12 +42,33 @@ class Website(Base):
     tasks: Mapped[List["MonitorTask"]] = relationship("MonitorTask", back_populates="website")
 
 
-class WatchContent(Base):
-    __tablename__ = "watch_contents"
+class ContentCategory(Base):
+    __tablename__ = "content_categories"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    text: Mapped[str] = mapped_column(String(50), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    contents: Mapped[List["WatchContent"]] = relationship(
+        "WatchContent",
+        back_populates="category",
+        cascade="all, delete-orphan",
+        order_by="WatchContent.created_at.desc()",
+    )
+
+
+class WatchContent(Base):
+    __tablename__ = "watch_contents"
+    __table_args__ = (
+        UniqueConstraint("category_id", "text", name="uq_content_category_text"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    text: Mapped[str] = mapped_column(String(50), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    category_id: Mapped[int] = mapped_column(ForeignKey("content_categories.id"), nullable=False)
+
+    category: Mapped[ContentCategory] = relationship("ContentCategory", back_populates="contents")
 
     tasks: Mapped[List["MonitorTask"]] = relationship(
         "MonitorTask",
@@ -133,3 +155,5 @@ class CrawlResult(Base):
     task: Mapped[MonitorTask] = relationship("MonitorTask", back_populates="results")
     website: Mapped[Website] = relationship("Website")
     content: Mapped[WatchContent | None] = relationship("WatchContent")
+
+

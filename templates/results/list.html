@@ -24,8 +24,14 @@
     <label class="form-label">关注内容</label>
     <select class="form-select" name="content_id">
       <option value="">全部</option>
-      {% for content in contents %}
-      <option value="{{ content.id }}" {% if query_args.content_id == content.id|string %}selected{% endif %}>{{ content.text }}</option>
+      {% for category in categories %}
+        {% if category.contents %}
+        <optgroup label="{{ category.name }}">
+          {% for content in category.contents %}
+          <option value="{{ content.id }}" {% if query_args.content_id == content.id|string %}selected{% endif %}>{{ content.text }}</option>
+          {% endfor %}
+        </optgroup>
+        {% endif %}
       {% endfor %}
     </select>
   </div>
@@ -59,7 +65,14 @@
       <td>{{ result.created_at }}</td>
       <td>{{ result.task.name }}</td>
       <td>{{ result.website.name }}</td>
-      <td>{{ result.content.text if result.content else '未知' }}</td>
+      <td>
+        {% if result.content %}
+          <div>{{ result.content.text }}</div>
+          <small class="text-muted">分类：{{ result.content.category.name if result.content.category else '未分类' }}</small>
+        {% else %}
+          未知
+        {% endif %}
+      </td>
       <td>{{ result.link_title or '无标题' }}</td>
       <td><a href="{{ result.discovered_url }}" target="_blank">打开</a></td>
       <td>{{ '%.2f'|format(result.similarity_score or 0) }}</td>

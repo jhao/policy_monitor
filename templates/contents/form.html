@@ -6,7 +6,20 @@
     <label class="form-label">关注内容（最多50个字符）</label>
     <input type="text" class="form-control" name="text" maxlength="50" required>
   </div>
-  <button class="btn btn-primary" type="submit">保存</button>
+  <div class="mb-3">
+    <label class="form-label">所属分类</label>
+    {% if categories %}
+    <select class="form-select" name="category_id" required>
+      <option value="">请选择分类</option>
+      {% for category in categories %}
+      <option value="{{ category.id }}" {% if selected_category_id == category.id %}selected{% endif %}>{{ category.name }}</option>
+      {% endfor %}
+    </select>
+    {% else %}
+    <div class="alert alert-info mb-0">当前尚未创建分类，请先返回列表新增分类后再添加关注内容。</div>
+    {% endif %}
+  </div>
+  <button class="btn btn-primary" type="submit" {% if not categories %}disabled{% endif %}>保存</button>
   <a class="btn btn-secondary" href="{{ url_for('list_contents') }}">返回</a>
 </form>
 {% endblock %}
