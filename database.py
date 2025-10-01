@@ -17,3 +17,17 @@ def init_db() -> None:
     import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+
+    with engine.begin() as connection:
+        existing_columns = {
+            row[1]
+            for row in connection.exec_driver_sql("PRAGMA table_info(websites)").fetchall()
+        }
+        if "title_selector_config" not in existing_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE websites ADD COLUMN title_selector_config TEXT"
+            )
+        if "content_selector_config" not in existing_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE websites ADD COLUMN content_selector_config TEXT"
+            )

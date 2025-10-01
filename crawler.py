@@ -11,9 +11,15 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup
 
+try:  # noqa: SIM105
+    from lxml import etree, html as lxml_html  # type: ignore import-not-found
+except ImportError:  # pragma: no cover - optional dependency
+    etree = None  # type: ignore[assignment]
+    lxml_html = None  # type: ignore[assignment]
+
 from database import SessionLocal
 from email_utils import NotificationConfigError, send_dingtalk_message, send_email
-from models import CrawlLog, CrawlLogDetail, CrawlResult, MonitorTask, WatchContent
+from models import CrawlLog, CrawlLogDetail, CrawlResult, MonitorTask, WatchContent, Website
 
 from nlp import similarity
 
@@ -37,7 +43,25 @@ def extract_body_text(html: str | None) -> str:
 
     soup = BeautifulSoup(html, "html.parser")
     body = soup.body or soup
-    for tag in body.find_all(["script", "style", "noscript"]):
+    for tag in body.find_all(["script", "style", "noscript", "nav", "aside", "footer"]):
+        tag.decompose()
+    keywords = ("menu", "nav", "breadcrumb", "pagination", "footer")
+
+    def _contains_keyword(value: str | list[str] | None) -> bool:
+        if not value:
+            return False
+        if isinstance(value, str):
+            candidates = value.split()
+        else:
+            candidates = [item for item in value if isinstance(item, str)]
+        lowered = [candidate.lower() for candidate in candidates]
+        return any(any(keyword in item for keyword in keywords) for item in lowered)
+
+    for tag in body.find_all(class_=_contains_keyword):
+        tag.decompose()
+    for tag in body.find_all(id=lambda value: isinstance(value, str) and any(keyword in value.lower() for keyword in keywords)):
+        tag.decompose()
+    for tag in body.find_all(attrs={"role": ["navigation", "contentinfo", "menubar"]}):
         tag.decompose()
     text = body.get_text(" ", strip=True)
     return _normalize_whitespace(text)
@@ -286,13 +310,132 @@ def _generate_main_idea(text: str, fallback_title: str) -> str:
     return fallback_title
 
 
-def summarize_html(html: str) -> tuple[str, str]:
+def _text_from_element(element: object) -> str:
+    try:
+        text = element.get_text(" ", strip=True)  # type: ignore[attr-defined]
+    except AttributeError:
+        text = ""
+    if not _is_non_empty_text(text):
+        for attribute in ("content", "value", "title", "alt"):
+            try:
+                candidate = element.get(attribute)  # type: ignore[attr-defined]
+            except AttributeError:
+                candidate = None
+            if _is_non_empty_text(candidate):
+                text = str(candidate).strip()
+                break
+    return _normalize_whitespace(text)
+
+
+def _parse_selector_config(config: str | None) -> list[tuple[str, str]]:
+    if not _is_non_empty_text(config):
+        return []
+    selectors: list[tuple[str, str]] = []
+    for raw_line in config.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            prefix, value = line.split("=", 1)
+            key = prefix.strip().lower()
+            selector_value = value.strip()
+            if not selector_value:
+                continue
+            if key in {"id", "#"}:
+                selectors.append(("css", f"#{selector_value}"))
+            elif key in {"class", "."}:
+                selectors.append(("css", f".{selector_value}"))
+            elif key == "name":
+                selectors.append(("css", f"[name='{selector_value}']"))
+            elif key in {"css", "selector"}:
+                selectors.append(("css", selector_value))
+            elif key == "xpath":
+                selectors.append(("xpath", selector_value))
+            else:
+                selectors.append(("css", selector_value))
+        else:
+            selectors.append(("css", line))
+    return selectors
+
+
+def _extract_text_by_selectors(html: str, selectors: list[tuple[str, str]]) -> str | None:
+    if not selectors:
+        return None
+    soup = BeautifulSoup(html, "html.parser")
+    for method, value in selectors:
+        element_text = ""
+        if method == "css":
+            try:
+                element = soup.select_one(value)
+            except Exception:  # noqa: BLE001
+                LOGGER.debug("CSS 选择器 %s 解析失败", value, exc_info=True)
+                continue
+            if element is None:
+                continue
+            element_text = _text_from_element(element)
+        elif method == "xpath":
+            if lxml_html is None or etree is None:
+                LOGGER.debug("XPath 规则 %s 被忽略，缺少 lxml 依赖", value)
+                continue
+            try:
+                tree = lxml_html.fromstring(html)
+            except Exception:  # noqa: BLE001
+                LOGGER.debug("解析 HTML 失败，无法应用 XPath %s", value, exc_info=True)
+                continue
+            try:
+                results = tree.xpath(value)
+            except Exception:  # noqa: BLE001
+                LOGGER.debug("执行 XPath %s 失败", value, exc_info=True)
+                continue
+            for result in results:
+                if hasattr(result, "itertext"):
+                    element_text = _normalize_whitespace(" ".join(result.itertext()))  # type: ignore[arg-type]
+                else:
+                    element_text = _normalize_whitespace(str(result))
+                if _is_non_empty_text(element_text):
+                    break
+        else:
+            continue
+        if _is_non_empty_text(element_text):
+            return element_text
+    return None
+
+
+def _summarize_without_preferences(html: str) -> tuple[str, str]:
     soup = BeautifulSoup(html, "html.parser")
     fallback_title = _extract_display_title(soup)
     text_content = extract_body_text(html)
     main_idea = _generate_main_idea(text_content, fallback_title)
     summary = text_content[:1000]
     return main_idea, summary
+
+
+def summarize_html(html: str, website: Website | None = None) -> tuple[str, str]:
+    fallback_title, fallback_summary = _summarize_without_preferences(html)
+
+    if not website:
+        return fallback_title, fallback_summary
+
+    title_selectors = _parse_selector_config(website.title_selector_config)
+    content_selectors = _parse_selector_config(website.content_selector_config)
+
+    preferred_title = _extract_text_by_selectors(html, title_selectors)
+    preferred_body = _extract_text_by_selectors(html, content_selectors)
+
+    title = fallback_title
+    summary = fallback_summary
+
+    if _is_non_empty_text(preferred_body):
+        summary = preferred_body[:1000]
+        idea = _generate_main_idea(preferred_body, preferred_title or fallback_title)
+        if _is_non_empty_text(preferred_title):
+            title = preferred_title
+        elif _is_non_empty_text(idea):
+            title = idea
+    elif _is_non_empty_text(preferred_title):
+        title = preferred_title
+
+    return title, summary
 
 
 def compare_links(old_html: str | None, new_html: str, base_url: str) -> List[str]:
@@ -406,7 +549,7 @@ def run_task(task_id: int) -> None:
         new_html = fetch_html(website.url)
         add_detail("主页面抓取成功")
 
-        main_title, main_summary = summarize_html(new_html)
+        main_title, main_summary = summarize_html(new_html, website)
         current_main_text = extract_body_text(new_html)
         LOGGER.info("Task %s fetched main page title: %s", task.name, main_title or "<无标题>")
         if main_title:
@@ -441,7 +584,7 @@ def run_task(task_id: int) -> None:
                     add_detail(f"子链接抓取失败：{link}", "warning")
                     subpage_errors.append(link)
                     continue
-                title, summary = summarize_html(link_html)
+                title, summary = summarize_html(link_html, website)
                 LOGGER.info(
                     "Task %s fetched sub page %s title: %s",
                     task.name,

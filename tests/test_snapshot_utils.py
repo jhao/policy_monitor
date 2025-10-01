@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from crawler import build_snapshot, parse_snapshot, summarize_html
+from models import Website
 
 
 def test_summarize_html_extracts_main_idea() -> None:
@@ -19,6 +20,50 @@ def test_summarize_html_extracts_main_idea() -> None:
     assert "Rendered Heading" in title
     assert "第一段内容" in title
     assert "第一段内容" in summary
+
+
+def test_summarize_html_ignores_navigation_text() -> None:
+    html = """
+    <html>
+      <body>
+        <nav class="main-menu"><a href="#">菜单项</a></nav>
+        <div id="content"><h1>政策更新</h1><p>这里是正文内容。</p></div>
+        <footer>底部信息</footer>
+      </body>
+    </html>
+    """
+    title, summary = summarize_html(html)
+
+    assert "菜单项" not in summary
+    assert "底部信息" not in summary
+    assert "政策更新" in title
+
+
+def test_summarize_html_prefers_configured_selectors() -> None:
+    html = """
+    <html>
+      <body>
+        <div class="header"><h1>站点标题</h1></div>
+        <article>
+          <h2 id="article-title">最新通知标题</h2>
+          <div class="article-body">
+            <p>第一段正文。</p>
+            <p>第二段正文。</p>
+          </div>
+        </article>
+      </body>
+    </html>
+    """
+    website = Website(
+        title_selector_config="id=article-title",
+        content_selector_config="css=.article-body",
+    )
+
+    title, summary = summarize_html(html, website)
+
+    assert title == "最新通知标题"
+    assert "第一段正文" in summary
+    assert "站点标题" not in title
 
 
 def test_build_and_parse_snapshot_preserve_titles() -> None:

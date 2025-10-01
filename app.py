@@ -129,6 +129,8 @@ def create_website() -> Any:
         url = request.form.get("url", "").strip()
         interval = int(request.form.get("interval", "60") or 60)
         fetch_subpages = bool(request.form.get("fetch_subpages"))
+        title_selectors = request.form.get("title_selectors", "").strip()
+        content_selectors = request.form.get("content_selectors", "").strip()
         if not name or not url:
             flash("请输入网站名称和URL", "danger")
         else:
@@ -137,6 +139,8 @@ def create_website() -> Any:
                 url=url,
                 interval_minutes=interval,
                 fetch_subpages=fetch_subpages,
+                title_selector_config=title_selectors or None,
+                content_selector_config=content_selectors or None,
             )
             session.add(website)
             session.commit()
@@ -157,6 +161,12 @@ def edit_website(website_id: int) -> Any:
         website.url = request.form.get("url", website.url)
         website.interval_minutes = int(request.form.get("interval", website.interval_minutes))
         website.fetch_subpages = bool(request.form.get("fetch_subpages"))
+        website.title_selector_config = (
+            request.form.get("title_selectors", "").strip() or None
+        )
+        website.content_selector_config = (
+            request.form.get("content_selectors", "").strip() or None
+        )
         session.add(website)
         session.commit()
         flash("网站信息已更新", "success")
