@@ -6,7 +6,7 @@ import re
 from collections import Counter
 from datetime import datetime
 from html import escape as html_escape
-from typing import Any, Iterable, List, Sequence
+from typing import Any, Callable, Iterable, List, Sequence
 from urllib.parse import urljoin
 
 import requests
@@ -589,6 +589,7 @@ def _send_task_notifications(
     session: Session,
     task: MonitorTask,
     payload_items: list[dict[str, str]],
+    detail_callback: Callable[[str, str], None] | None = None,
 ) -> None:
     if task.notification_method == "dingtalk":
         links = [
@@ -599,6 +600,11 @@ def _send_task_notifications(
             }
             for item in payload_items
         ]
+        if detail_callback:
+            detail_callback(
+                f"准备发送钉钉通知，共 {len(payload_items)} 条", "info"
+            )
+        LOGGER.info("Task %s sending DingTalk notification", task.id)
         try:
             webhook_url = send_dingtalk_message(
                 {
@@ -609,6 +615,8 @@ def _send_task_notifications(
             )
         except NotificationConfigError as exc:
             LOGGER.warning("钉钉通知配置缺失，任务 %s 无法发送", task.id)
+            if detail_callback:
+                detail_callback("钉钉通知配置缺失，未能发送", "warning")
             _record_notification_log(
                 session,
                 task,
@@ -619,6 +627,8 @@ def _send_task_notifications(
             )
         except Exception as exc:  # noqa: BLE001
             LOGGER.exception("任务 %s 发送钉钉通知失败", task.id)
+            if detail_callback:
+                detail_callback("钉钉通知发送失败", "error")
             _record_notification_log(
                 session,
                 task,
@@ -628,6 +638,8 @@ def _send_task_notifications(
                 message=str(exc) or "钉钉通知发送失败",
             )
         else:
+            if detail_callback:
+                detail_callback("钉钉通知发送成功", "success")
             _record_notification_log(
                 session,
                 task,
@@ -645,6 +657,8 @@ def _send_task_notifications(
     ]
     if not recipients:
         LOGGER.warning("Task %s has no notification email", task.id)
+        if detail_callback:
+            detail_callback("任务未配置通知邮箱，无法发送邮件", "warning")
         _record_notification_log(
             session,
             task,
@@ -664,6 +678,13 @@ def _send_task_notifications(
         if item["summary"]:
             text_lines.append(f"  摘要：{item['summary']}")
 
+    if detail_callback:
+        detail_callback(
+            f"准备发送邮件通知至：{', '.join(recipients)}", "info"
+        )
+    LOGGER.info(
+        "Task %s sending email notification to %s", task.id, ", ".join(recipients)
+    )
     try:
         send_email(
             subject=f"监控任务 {task.name} 有新内容",
@@ -673,6 +694,8 @@ def _send_task_notifications(
         )
     except NotificationConfigError as exc:
         LOGGER.warning("邮件通知配置缺失，任务 %s 无法发送", task.id)
+        if detail_callback:
+            detail_callback("邮件通知配置缺失，未能发送", "warning")
         _record_notification_log(
             session,
             task,
@@ -683,6 +706,8 @@ def _send_task_notifications(
         )
     except Exception as exc:  # noqa: BLE001
         LOGGER.exception("任务 %s 发送邮件失败", task.id)
+        if detail_callback:
+            detail_callback("邮件通知发送失败", "error")
         _record_notification_log(
             session,
             task,
@@ -692,6 +717,8 @@ def _send_task_notifications(
             message=str(exc) or "邮件发送失败",
         )
     else:
+        if detail_callback:
+            detail_callback("邮件通知发送成功", "success")
         _record_notification_log(
             session,
             task,
@@ -890,7 +917,7 @@ def run_task(task_id: int) -> None:
                         "pic": image_url,
                     }
                 )
-            _send_task_notifications(session, task, payload_items)
+            _send_task_notifications(session, task, payload_items, add_detail)
     except Exception as exc:  # noqa: BLE001
         session.rollback()
         LOGGER.exception("Task %s failed", task_id)
