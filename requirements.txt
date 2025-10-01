@@ -2,6 +2,7 @@ Flask>=3.1.0
 SQLAlchemy>=2.0.23
 requests>=2.31.0
 beautifulsoup4>=4.12.2
+playwright>=1.42.0
 
 # 以下依赖仅在使用语义相似度模型时需要，Python 3.13 环境可选择跳过
 sentence-transformers>=2.2.2; python_version < "3.13"
