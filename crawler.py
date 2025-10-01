@@ -446,12 +446,61 @@ def compare_links(old_html: str | None, new_html: str, base_url: str) -> List[st
     return list(current_links - previous_links)
 
 
-def score_contents(article_summary: str, contents: Iterable[WatchContent]) -> list[tuple[WatchContent, float]]:
-    if not contents:
+KEYWORD_SPLIT_PATTERN = re.compile(r"[,\u3001，;；、\s]+")
+
+
+def _extract_keywords(text: str) -> list[str]:
+    """Split watch content text into keywords.
+
+    Returns the original text as a single keyword if no separators are found.
+    """
+
+    parts = [part.strip() for part in KEYWORD_SPLIT_PATTERN.split(text) if part.strip()]
+    return parts or [text.strip()]
+
+
+def score_contents(
+    article_title: str | None,
+    article_summary: str | None,
+    contents: Iterable[WatchContent],
+) -> list[tuple[WatchContent, float]]:
+    contents_list = list(contents)
+    if not contents_list:
         return []
-    candidate_texts = [content.text for content in contents]
-    scores = similarity(article_summary, candidate_texts)
-    return list(zip(contents, scores))
+
+    normalized_title = (article_title or "").lower()
+    normalized_summary = (article_summary or "").lower()
+    results: list[tuple[WatchContent, float]] = []
+    unmatched_contents: list[tuple[int, WatchContent]] = []
+
+    for index, content in enumerate(contents_list):
+        text = content.text.strip()
+        if not text:
+            results.append((content, 0.0))
+            continue
+
+        keywords = _extract_keywords(text)
+        matched = False
+        for keyword in keywords:
+            keyword_lower = keyword.lower()
+            if not keyword_lower:
+                continue
+            if keyword_lower in normalized_title or keyword_lower in normalized_summary:
+                results.append((content, 1.0))
+                matched = True
+                break
+
+        if not matched:
+            results.append((content, 0.0))
+            unmatched_contents.append((index, content))
+
+    if unmatched_contents:
+        candidate_texts = [content.text for _, content in unmatched_contents]
+        scores = similarity(normalized_summary, candidate_texts)
+        for (index, content), score in zip(unmatched_contents, scores):
+            results[index] = (content, score)
+
+    return results
 
 
 def notify(
@@ -596,7 +645,7 @@ def run_task(task_id: int) -> None:
                 else:
                     add_detail("子链接未发现标题", "warning")
                 subpage_snapshots[-1]["title"] = title
-                scores = score_contents(summary, task.watch_contents)
+                scores = score_contents(title, summary, task.watch_contents)
                 matches = [(content, score) for content, score in scores if score >= SIMILARITY_THRESHOLD]
                 if matches:
                     matched_contents = ", ".join(f"{content.text}({score:.2f})" for content, score in matches)
@@ -621,7 +670,7 @@ def run_task(task_id: int) -> None:
             add_detail("检测到页面发生变化" if has_changed else "页面内容无变化")
             if has_changed:
                 title, summary = main_title, main_summary
-                scores = score_contents(summary, task.watch_contents)
+                scores = score_contents(title, summary, task.watch_contents)
                 matches = [(content, score) for content, score in scores if score >= SIMILARITY_THRESHOLD]
                 if matches:
                     matched_contents = ", ".join(f"{content.text}({score:.2f})" for content, score in matches)
