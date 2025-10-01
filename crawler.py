@@ -158,6 +158,13 @@ def run_task(task_id: int) -> None:
         LOGGER.info("Running task %s on %s", task.name, website.url)
         new_html = fetch_html(website.url)
         add_detail("主页面抓取成功")
+
+        main_title, main_summary = summarize_html(new_html)
+        LOGGER.info("Task %s fetched main page title: %s", task.name, main_title or "<无标题>")
+        if main_title:
+            add_detail(f"主页面标题：{main_title}")
+        else:
+            add_detail("主页面未发现标题", "warning")
         matched_results: list[tuple[str, str, str, list[tuple[WatchContent, float]]]] = []
 
         subpage_errors: list[str] = []
@@ -178,6 +185,16 @@ def run_task(task_id: int) -> None:
                     subpage_errors.append(link)
                     continue
                 title, summary = summarize_html(link_html)
+                LOGGER.info(
+                    "Task %s fetched sub page %s title: %s",
+                    task.name,
+                    link,
+                    title or "<无标题>",
+                )
+                if title:
+                    add_detail(f"子链接标题：{title}")
+                else:
+                    add_detail("子链接未发现标题", "warning")
                 scores = score_contents(summary, task.watch_contents)
                 matches = [(content, score) for content, score in scores if score >= SIMILARITY_THRESHOLD]
                 if matches:
@@ -199,7 +216,7 @@ def run_task(task_id: int) -> None:
             has_changed = website.last_snapshot != new_html
             add_detail("检测到页面发生变化" if has_changed else "页面内容无变化")
             if has_changed:
-                title, summary = summarize_html(new_html)
+                title, summary = main_title, main_summary
                 scores = score_contents(summary, task.watch_contents)
                 matches = [(content, score) for content, score in scores if score >= SIMILARITY_THRESHOLD]
                 if matches:
