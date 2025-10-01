@@ -491,8 +491,22 @@ def manage_notifications() -> Any:
                 try:
                     webhook_url = send_dingtalk_message(
                         {
-                            "msgtype": "text",
-                            "text": {"content": "【测试】政策监控钉钉通知已触发"},
+                            "msgtype": "feedCard",
+                            "title": "测试数据",
+                            "feedCard": {
+                                "links": [
+                                    {
+                                        "title": "测试标题1",
+                                        "messageURL": "https://www.dingtalk.com/",
+                                        "picURL": "https://img.alicdn.com/tfs/TB1NwmBEL9TBuNjy1zbXXXpepXa-2400-1218.png",
+                                    },
+                                    {
+                                        "title": "测试标题2",
+                                        "messageURL": "https://www.dingtalk.com/",
+                                        "picURL": "https://img.alicdn.com/tfs/TB1NwmBEL9TBuNjy1zbXXXpepXa-2400-1218.png",
+                                    },
+                                ]
+                            },
                         }
                     )
                 except NotificationConfigError as exc:
