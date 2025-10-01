@@ -214,15 +214,24 @@ def fetch_html(url: str) -> str:
         LOGGER.warning("Playwright 未安装，回退到 requests 抓取 %s", url)
         return _fetch_html_with_requests(url)
 
+    browser = None
+    context = None
     try:
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True, args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"])
+            browser = playwright.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
+            )
             context = browser.new_context()
             page = context.new_page()
-            page.goto(url, wait_until="networkidle", timeout=20_000)
+            page.goto(url, wait_until="domcontentloaded", timeout=30_000)
+            try:
+                page.wait_for_load_state("networkidle", timeout=30_000)
+            except PlaywrightTimeoutError:
+                LOGGER.debug("等待 %s 的 networkidle 状态超时，继续尝试获取页面内容", url)
+            page.wait_for_load_state("load", timeout=30_000)
+            page.wait_for_timeout(2_000)
             html = page.content()
-            context.close()
-            browser.close()
             return html
     except PlaywrightTimeoutError as exc:
         LOGGER.warning("使用无头浏览器抓取 %s 超时：%s，改用 requests", url, exc)
@@ -230,6 +239,11 @@ def fetch_html(url: str) -> str:
     except PlaywrightError as exc:
         LOGGER.warning("使用无头浏览器抓取 %s 失败：%s，改用 requests", url, exc)
         return _fetch_html_with_requests(url)
+    finally:
+        if context is not None:
+            context.close()
+        if browser is not None:
+            browser.close()
 
 
 def extract_links(html: str, base_url: str) -> List[str]:
