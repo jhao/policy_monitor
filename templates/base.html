@@ -19,6 +19,9 @@
       </div>
     </nav>
     <div class="container">
+      <div class="alert alert-light border rounded-1 py-2 small" role="note">
+        平台时间均以：<strong>{{ current_timezone_display }}</strong> 为准。
+      </div>
       {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
           {% for category, message in messages %}

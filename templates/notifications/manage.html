@@ -56,4 +56,68 @@
     </div>
   </div>
 </div>
+
+<div class="card">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>发送日志</span>
+    <span class="badge text-bg-secondary">共 {{ log_total }} 条</span>
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-striped mb-0">
+        <thead>
+          <tr>
+            <th scope="col" style="width: 20%;">时间</th>
+            <th scope="col" style="width: 15%;">渠道</th>
+            <th scope="col">目标</th>
+            <th scope="col" style="width: 10%;">状态</th>
+            <th scope="col">说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for log in notification_logs %}
+          <tr>
+            <td>{{ log.created_at|format_datetime or '未知' }}</td>
+            <td>{{ '邮件' if log.channel == 'email' else '钉钉' }}</td>
+            <td class="text-truncate" style="max-width: 260px;" title="{{ log.target }}">{{ log.target or '未提供' }}</td>
+            <td>
+              {% if log.status == 'success' %}
+              <span class="badge text-bg-success">成功</span>
+              {% elif log.status == 'failed' %}
+              <span class="badge text-bg-danger">失败</span>
+              {% else %}
+              <span class="badge text-bg-secondary">{{ log.status }}</span>
+              {% endif %}
+            </td>
+            <td>{{ log.message or '—' }}</td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="5" class="text-center text-muted py-4">暂无发送记录</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% if log_total_pages > 1 %}
+  <div class="card-footer">
+    <nav aria-label="发送日志分页">
+      <ul class="pagination justify-content-center mb-0">
+        <li class="page-item {% if log_page <= 1 %}disabled{% endif %}">
+          <a class="page-link" href="{{ url_for('manage_notifications', page=log_page-1) }}" tabindex="-1">上一页</a>
+        </li>
+        {% for p in range(1, log_total_pages + 1) %}
+        <li class="page-item {% if p == log_page %}active{% endif %}">
+          <a class="page-link" href="{{ url_for('manage_notifications', page=p) }}">{{ p }}</a>
+        </li>
+        {% endfor %}
+        <li class="page-item {% if log_page >= log_total_pages %}disabled{% endif %}">
+          <a class="page-link" href="{{ url_for('manage_notifications', page=log_page+1) }}">下一页</a>
+        </li>
+      </ul>
+    </nav>
+  </div>
+  {% endif %}
+</div>
 {% endblock %}

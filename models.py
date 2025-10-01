@@ -111,6 +111,12 @@ class MonitorTask(Base):
         cascade="all, delete-orphan",
         order_by="desc(CrawlResult.created_at)",
     )
+    notification_logs: Mapped[List["NotificationLog"]] = relationship(
+        "NotificationLog",
+        back_populates="task",
+        cascade="all, delete-orphan",
+        order_by="desc(NotificationLog.created_at)",
+    )
 
 
 class NotificationSetting(Base):
@@ -175,4 +181,18 @@ class CrawlLogDetail(Base):
     message: Mapped[str] = mapped_column(Text, nullable=False)
 
     log: Mapped[CrawlLog] = relationship("CrawlLog", back_populates="entries")
+
+
+class NotificationLog(Base):
+    __tablename__ = "notification_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    task_id: Mapped[int | None] = mapped_column(ForeignKey("monitor_tasks.id"), nullable=True)
+    channel: Mapped[str] = mapped_column(String(50), nullable=False)
+    target: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    task: Mapped[MonitorTask | None] = relationship("MonitorTask", back_populates="notification_logs")
 

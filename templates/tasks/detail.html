@@ -48,9 +48,9 @@
         <h5 class="card-title">执行与通知</h5>
         <p class="mb-1"><strong>任务状态：</strong> {{ '运行中' if task.is_active else '已暂停' }}</p>
         <p class="mb-1"><strong>最近执行状态：</strong> {{ status_styles.get(task.last_status, ('secondary', task.last_status or '无'))[1] }}</p>
-        <p class="mb-1"><strong>最近执行时间：</strong> {{ task.last_run_at or '无' }}</p>
+        <p class="mb-1"><strong>最近执行时间：</strong> {{ task.last_run_at|format_datetime or '无' }}</p>
         {% if next_run_at %}
-        <p class="mb-1"><strong>下一次执行时间：</strong> {{ next_run_at.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+        <p class="mb-1"><strong>下一次执行时间：</strong> {{ next_run_at|format_datetime }}</p>
         {% elif task.is_active and not active_log %}
         <p class="mb-1 text-muted"><strong>下一次执行时间：</strong> 调度将在配置的间隔内自动安排</p>
         {% endif %}
@@ -82,8 +82,8 @@
             <div class="d-flex flex-grow-1 flex-wrap align-items-center gap-2">
               <span class="badge text-bg-{{ status[0] }}" data-log-status>{{ status[1] }}</span>
               <span class="text-muted small">编号：{{ log.id }}</span>
-              <span class="text-muted small">开始：{{ log.run_started_at or '未知' }}</span>
-              <span class="text-muted small">结束：<span data-log-finished>{{ log.run_finished_at or (log.status == 'running' and '进行中' or '未知') }}</span></span>
+              <span class="text-muted small">开始：{{ log.run_started_at|format_datetime or '未知' }}</span>
+              <span class="text-muted small">结束：<span data-log-finished>{{ log.run_finished_at|format_datetime or (log.status == 'running' and '进行中' or '未知') }}</span></span>
               <span class="text-muted small text-truncate">{{ log.message or '暂无汇总信息' }}</span>
             </div>
           </button>
@@ -95,7 +95,7 @@
               {% for entry in log.entries %}
               <li class="mb-2" data-entry-id="{{ entry.id }}">
                 <span class="badge text-bg-secondary me-2">{{ entry.level|upper }}</span>
-                <small class="text-muted me-2">{{ entry.created_at }}</small>
+                <small class="text-muted me-2">{{ entry.created_at|format_datetime }}</small>
                 {{ entry.message }}
               </li>
               {% else %}
@@ -140,7 +140,7 @@
   <tbody>
     {% for result in results %}
     <tr>
-      <td>{{ result.created_at }}</td>
+      <td>{{ result.created_at|format_datetime }}</td>
       <td>{{ result.link_title or '无标题' }}</td>
       <td><a href="{{ result.discovered_url }}" target="_blank">打开</a></td>
       <td>{{ result.content.text if result.content else '未知' }}</td>
