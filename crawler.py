@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
 from typing import Iterable, List
@@ -16,6 +17,55 @@ from nlp import similarity
 
 SIMILARITY_THRESHOLD = 0.6
 LOGGER = logging.getLogger(__name__)
+
+
+def parse_snapshot(snapshot: str | None) -> tuple[str | None, list[dict[str, str]]]:
+    """Parse a stored snapshot payload.
+
+    Returns a tuple containing the main page HTML and a list of subpage entries.
+    Each entry is a mapping with ``url`` and ``html`` keys. The helper is
+    backward-compatible with legacy snapshots that stored the main HTML as a
+    plain string.
+    """
+
+    if not snapshot:
+        return None, []
+
+    try:
+        data = json.loads(snapshot)
+    except json.JSONDecodeError:
+        return snapshot, []
+
+    if isinstance(data, dict) and ("main_html" in data or "subpages" in data):
+        main_html = data.get("main_html") if isinstance(data.get("main_html"), str) else None
+        subpages_data = data.get("subpages", [])
+        entries: list[dict[str, str]] = []
+        if isinstance(subpages_data, dict):
+            for url, html in subpages_data.items():
+                if isinstance(url, str) and isinstance(html, str):
+                    entries.append({"url": url, "html": html})
+        elif isinstance(subpages_data, list):
+            for item in subpages_data:
+                if isinstance(item, dict):
+                    url = item.get("url")
+                    html = item.get("html")
+                    if isinstance(url, str) and isinstance(html, str):
+                        entries.append({"url": url, "html": html})
+        return main_html, entries
+
+    if isinstance(data, str):
+        return data, []
+
+    return snapshot, []
+
+
+def build_snapshot(main_html: str, subpages: list[dict[str, str]]) -> str:
+    payload = {
+        "version": 1,
+        "main_html": main_html,
+        "subpages": subpages,
+    }
+    return json.dumps(payload, ensure_ascii=False)
 
 
 class CrawlError(RuntimeError):
@@ -160,6 +210,7 @@ def run_task(task_id: int) -> None:
 
         add_detail(f"准备抓取网站：{website.url}")
         LOGGER.info("Running task %s on %s", task.name, website.url)
+        previous_main_html, _ = parse_snapshot(website.last_snapshot)
         new_html = fetch_html(website.url)
         add_detail("主页面抓取成功")
 
@@ -173,8 +224,10 @@ def run_task(task_id: int) -> None:
 
         subpage_errors: list[str] = []
 
+        subpage_snapshots: list[dict[str, str]] = []
+
         if website.fetch_subpages:
-            new_links = compare_links(website.last_snapshot, new_html, website.url)
+            new_links = compare_links(previous_main_html, new_html, website.url)
             LOGGER.debug("Found %d new links", len(new_links))
             add_detail(f"发现新链接 {len(new_links)} 个")
 
@@ -183,6 +236,7 @@ def run_task(task_id: int) -> None:
                 try:
                     link_html = fetch_html(link)
                     add_detail(f"子链接抓取成功：{link}")
+                    subpage_snapshots.append({"url": link, "html": link_html})
                 except Exception:  # noqa: BLE001
                     LOGGER.exception("Failed to fetch sub link %s", link)
                     add_detail(f"子链接抓取失败：{link}", "warning")
@@ -217,7 +271,7 @@ def run_task(task_id: int) -> None:
                     session.add(result)
                     matched_results.append((title, link, summary, matches))
         else:
-            has_changed = website.last_snapshot != new_html
+            has_changed = previous_main_html != new_html
             add_detail("检测到页面发生变化" if has_changed else "页面内容无变化")
             if has_changed:
                 title, summary = main_title, main_summary
@@ -244,7 +298,7 @@ def run_task(task_id: int) -> None:
         else:
             add_detail("未发现符合条件的内容")
 
-        website.last_snapshot = new_html
+        website.last_snapshot = build_snapshot(new_html, subpage_snapshots)
         website.last_fetched_at = datetime.utcnow()
         task.last_run_at = datetime.utcnow()
         task.last_status = "success" if matched_results else "completed"

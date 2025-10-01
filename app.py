@@ -7,7 +7,7 @@ from typing import Any
 from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
 from sqlalchemy.orm import joinedload, selectinload
 
-from crawler import SIMILARITY_THRESHOLD, run_task
+from crawler import SIMILARITY_THRESHOLD, parse_snapshot, run_task
 from database import SessionLocal, init_db
 from models import (
     ContentCategory,
@@ -78,9 +78,10 @@ def view_website_snapshot(website_id: int) -> Any:
             flash("未找到网站", "danger")
             return redirect(url_for("list_websites"))
 
-        snapshot_lines: list[str] = []
-        if website.last_snapshot:
-            snapshot_lines = website.last_snapshot.splitlines()
+        main_snapshot, subpage_snapshots = parse_snapshot(website.last_snapshot)
+        snapshot_entries: list[dict[str, str]] = subpage_snapshots
+        if not snapshot_entries and main_snapshot:
+            snapshot_entries = [{"url": website.url, "html": main_snapshot}]
 
         related_tasks = [
             {"id": task.id, "name": task.name}
@@ -90,7 +91,7 @@ def view_website_snapshot(website_id: int) -> Any:
         return render_template(
             "websites/snapshot.html",
             website=website,
-            snapshot_lines=snapshot_lines,
+            snapshot_entries=snapshot_entries,
             related_tasks=related_tasks,
         )
     finally:

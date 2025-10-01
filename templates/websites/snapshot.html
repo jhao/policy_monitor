@@ -12,60 +12,25 @@
   </div>
 </div>
 <p class="text-muted">最近抓取时间：{{ website.last_fetched_at or '尚未抓取' }}</p>
-{% if snapshot_lines %}
-<div class="card mb-4">
-  <div class="card-header">逐条浏览快照内容</div>
-  <div class="card-body">
-    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
-      <button type="button" class="btn btn-outline-secondary" id="snapshot-prev" aria-label="上一条">上一条</button>
-      <button type="button" class="btn btn-outline-secondary" id="snapshot-next" aria-label="下一条">下一条</button>
-      <div class="ms-auto small text-muted">第 <span id="snapshot-index">1</span> / {{ snapshot_lines|length }} 行</div>
+{% if snapshot_entries %}
+<div class="accordion" id="snapshot-accordion">
+  {% for entry in snapshot_entries %}
+  {% set heading_id = 'snapshot-heading-' ~ loop.index %}
+  {% set collapse_id = 'snapshot-collapse-' ~ loop.index %}
+  <div class="accordion-item">
+    <h2 class="accordion-header" id="{{ heading_id }}">
+      <button class="accordion-button{% if not loop.first %} collapsed{% endif %}" type="button" data-bs-toggle="collapse" data-bs-target="#{{ collapse_id }}" aria-expanded="{{ 'true' if loop.first else 'false' }}" aria-controls="{{ collapse_id }}">
+        子链接 {{ loop.index }}：{{ entry.url }}
+      </button>
+    </h2>
+    <div id="{{ collapse_id }}" class="accordion-collapse collapse{% if loop.first %} show{% endif %}" aria-labelledby="{{ heading_id }}" data-bs-parent="#snapshot-accordion">
+      <div class="accordion-body">
+        <pre class="border rounded p-3 bg-light" style="white-space: pre-wrap; max-height: 60vh; overflow:auto;">{{ entry.html }}</pre>
+      </div>
     </div>
-    <pre id="snapshot-current" class="border rounded p-3 bg-light" style="white-space: pre-wrap; min-height: 6rem;">{{ snapshot_lines[0] }}</pre>
   </div>
+  {% endfor %}
 </div>
-<div class="card">
-  <div class="card-header">完整快照内容</div>
-  <div class="card-body">
-    <pre class="border rounded p-3 bg-light" style="white-space: pre-wrap; max-height: 60vh; overflow:auto;">{{ snapshot_lines|join('\n') }}</pre>
-  </div>
-</div>
-<script>
-  document.addEventListener('DOMContentLoaded', function () {
-    const lines = {{ snapshot_lines|tojson }};
-    const prevBtn = document.getElementById('snapshot-prev');
-    const nextBtn = document.getElementById('snapshot-next');
-    const currentEl = document.getElementById('snapshot-current');
-    const indexEl = document.getElementById('snapshot-index');
-    let index = 0;
-
-    function updateView() {
-      if (!lines.length) {
-        return;
-      }
-      currentEl.textContent = lines[index] || '';
-      indexEl.textContent = index + 1;
-      prevBtn.disabled = index <= 0;
-      nextBtn.disabled = index >= lines.length - 1;
-    }
-
-    prevBtn.addEventListener('click', function () {
-      if (index > 0) {
-        index -= 1;
-        updateView();
-      }
-    });
-
-    nextBtn.addEventListener('click', function () {
-      if (index < lines.length - 1) {
-        index += 1;
-        updateView();
-      }
-    });
-
-    updateView();
-  });
-</script>
 {% else %}
 <div class="alert alert-secondary">暂时没有可供展示的快照内容。</div>
 {% endif %}
