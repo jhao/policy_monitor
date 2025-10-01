@@ -5,7 +5,7 @@ import json
 from crawler import build_snapshot, parse_snapshot, summarize_html
 
 
-def test_summarize_html_prefers_heading_over_title() -> None:
+def test_summarize_html_extracts_main_idea() -> None:
     html = """
     <html>
       <head><title>HTML Title</title></head>
@@ -16,7 +16,8 @@ def test_summarize_html_prefers_heading_over_title() -> None:
     </html>
     """
     title, summary = summarize_html(html)
-    assert title == "Rendered Heading"
+    assert "Rendered Heading" in title
+    assert "第一段内容" in title
     assert "第一段内容" in summary
 
 
@@ -36,12 +37,14 @@ def test_build_and_parse_snapshot_preserve_titles() -> None:
         main_title="主标题",
     )
 
-    parsed_main_html, entries, main_title = parse_snapshot(snapshot)
+    parsed_main_html, entries, main_title, main_text = parse_snapshot(snapshot)
 
     assert parsed_main_html == main_html
     assert main_title == "主标题"
+    assert "内容A" in (main_text or "")
     assert entries[0]["url"] == "https://example.com/sub"
     assert entries[0]["title"] == "子标题"
+    assert "内容B" in (entries[0]["text"] or "")
 
 
 def test_parse_snapshot_legacy_payloads_fill_missing_titles() -> None:
@@ -60,8 +63,10 @@ def test_parse_snapshot_legacy_payloads_fill_missing_titles() -> None:
         }
     )
 
-    parsed_main_html, entries, main_title = parse_snapshot(legacy_payload)
+    parsed_main_html, entries, main_title, main_text = parse_snapshot(legacy_payload)
 
     assert parsed_main_html == main_html
-    assert main_title == "旧标题"
-    assert entries[0]["title"] == "旧子标题"
+    assert main_title and main_title.startswith("旧标题")
+    assert entries[0]["title"] and entries[0]["title"].startswith("旧子标题")
+    assert "旧内容" in (main_text or "")
+    assert "子内容" in (entries[0]["text"] or "")

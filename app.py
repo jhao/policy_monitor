@@ -78,7 +78,7 @@ def view_website_snapshot(website_id: int) -> Any:
             flash("未找到网站", "danger")
             return redirect(url_for("list_websites"))
 
-        main_snapshot, subpage_snapshots, main_title = parse_snapshot(website.last_snapshot)
+        main_snapshot, subpage_snapshots, main_title, main_text = parse_snapshot(website.last_snapshot)
         snapshot_entries: list[dict[str, str | None]] = []
         if main_snapshot:
             snapshot_entries.append(
@@ -86,6 +86,7 @@ def view_website_snapshot(website_id: int) -> Any:
                     "url": website.url,
                     "html": main_snapshot,
                     "title": main_title,
+                    "text": main_text,
                     "label": "主页面",
                 }
             )
@@ -98,6 +99,7 @@ def view_website_snapshot(website_id: int) -> Any:
                     "url": entry.get("url"),
                     "html": entry.get("html"),
                     "title": entry.get("title"),
+                    "text": entry.get("text"),
                     "label": f"子链接 {index}",
                 }
             )
