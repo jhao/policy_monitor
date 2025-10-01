@@ -5,10 +5,18 @@ from datetime import datetime
 from typing import Any
 
 from flask import Flask, flash, redirect, render_template, request, url_for
+from sqlalchemy.orm import selectinload
 
 from crawler import SIMILARITY_THRESHOLD
 from database import SessionLocal, init_db
-from models import CrawlLog, CrawlResult, MonitorTask, WatchContent, Website
+from models import (
+    ContentCategory,
+    CrawlLog,
+    CrawlResult,
+    MonitorTask,
+    WatchContent,
+    Website,
+)
 from scheduler import MonitorScheduler
 
 logging.basicConfig(level=logging.INFO)
@@ -117,57 +125,217 @@ def delete_website(website_id: int) -> Any:
 @app.route("/contents")
 def list_contents() -> Any:
     session = SessionLocal()
-    contents = session.query(WatchContent).order_by(WatchContent.created_at.desc()).all()
-    return render_template("contents/list.html", contents=contents)
+    categories = (
+        session.query(ContentCategory)
+        .options(selectinload(ContentCategory.contents))
+        .order_by(ContentCategory.name)
+        .all()
+    )
+    total_count = session.query(WatchContent).count()
+    selected_category_id = request.args.get("category_id", type=int)
+    selected_category = None
+
+    query = (
+        session.query(WatchContent)
+        .options(selectinload(WatchContent.category))
+        .order_by(WatchContent.created_at.desc())
+    )
+    if selected_category_id:
+        selected_category = next(
+            (category for category in categories if category.id == selected_category_id),
+            None,
+        )
+        if not selected_category:
+            flash("选择的分类不存在", "warning")
+            return redirect(url_for("list_contents"))
+        query = query.filter(WatchContent.category_id == selected_category_id)
+
+    contents = query.all()
+    return render_template(
+        "contents/list.html",
+        contents=contents,
+        categories=categories,
+        selected_category=selected_category,
+        selected_category_id=selected_category_id,
+        total_count=total_count,
+    )
+
+
+@app.route("/content-categories", methods=["POST"])
+def create_content_category() -> Any:
+    session = SessionLocal()
+    name = request.form.get("name", "").strip()
+    if not name:
+        flash("请输入分类名称", "danger")
+        return redirect(url_for("list_contents"))
+
+    category = ContentCategory(name=name)
+    session.add(category)
+    try:
+        session.commit()
+        flash("分类已创建", "success")
+    except Exception:  # noqa: BLE001
+        session.rollback()
+        flash("分类名称已存在", "warning")
+    return redirect(url_for("list_contents"))
+
+
+@app.route("/content-categories/<int:category_id>/delete", methods=["POST"])
+def delete_content_category(category_id: int) -> Any:
+    session = SessionLocal()
+    category = session.get(ContentCategory, category_id)
+    if not category:
+        flash("分类不存在", "warning")
+        return redirect(url_for("list_contents"))
+
+    if category.contents:
+        flash("请先清空该分类下的关注内容", "warning")
+        return redirect(url_for("list_contents", category_id=category.id))
+
+    session.delete(category)
+    session.commit()
+    flash("分类已删除", "success")
+    return redirect(url_for("list_contents"))
+
+
+@app.route("/content-categories/<int:category_id>/bulk", methods=["GET", "POST"])
+def bulk_edit_category_contents(category_id: int) -> Any:
+    session = SessionLocal()
+    category = session.get(ContentCategory, category_id)
+    if not category:
+        flash("未找到分类", "danger")
+        return redirect(url_for("list_contents"))
+
+    if request.method == "POST":
+        raw_text = request.form.get("bulk_text", "")
+        lines = [line.strip() for line in raw_text.splitlines()]
+        new_texts: list[str] = []
+        unique_texts: set[str] = set()
+
+        for line in lines:
+            if not line:
+                continue
+            if len(line) > 50:
+                flash("每条关注内容不能超过50个字符", "danger")
+                return render_template(
+                    "contents/bulk_edit.html",
+                    category=category,
+                    bulk_text=raw_text,
+                )
+            if line in unique_texts:
+                continue
+            unique_texts.add(line)
+            new_texts.append(line)
+
+        existing_by_text = {content.text: content for content in list(category.contents)}
+
+        for text, content in existing_by_text.items():
+            if text not in unique_texts:
+                session.delete(content)
+
+        for text in new_texts:
+            if text not in existing_by_text:
+                session.add(WatchContent(text=text, category=category))
+
+        try:
+            session.commit()
+            flash("分类关注内容已更新", "success")
+            return redirect(url_for("list_contents", category_id=category.id))
+        except Exception:  # noqa: BLE001
+            session.rollback()
+            flash("保存关注内容时发生错误，请检查是否存在重复记录", "danger")
+            return render_template(
+                "contents/bulk_edit.html",
+                category=category,
+                bulk_text=raw_text,
+            )
+
+    bulk_text = "\n".join(content.text for content in sorted(category.contents, key=lambda c: c.created_at))
+    return render_template("contents/bulk_edit.html", category=category, bulk_text=bulk_text)
 
 
 @app.route("/contents/new", methods=["GET", "POST"])
 def create_content() -> Any:
     session = SessionLocal()
+    categories = (
+        session.query(ContentCategory)
+        .options(selectinload(ContentCategory.contents))
+        .order_by(ContentCategory.name)
+        .all()
+    )
+    selected_category_id = request.args.get("category_id", type=int)
+
     if request.method == "POST":
         text = request.form.get("text", "").strip()
+        category_id = request.form.get("category_id", type=int)
         if not text:
             flash("请输入关注内容", "danger")
         elif len(text) > 50:
             flash("关注内容不能超过50个字符", "danger")
+        elif not category_id:
+            flash("请选择分类", "danger")
         else:
-            content = WatchContent(text=text)
-            session.add(content)
-            try:
-                session.commit()
-                flash("关注内容已添加", "success")
-                return redirect(url_for("list_contents"))
-            except Exception:  # noqa: BLE001
-                session.rollback()
-                flash("关注内容已存在", "warning")
-    return render_template("contents/form.html")
+            category = session.get(ContentCategory, category_id)
+            if not category:
+                flash("分类不存在", "danger")
+            else:
+                content = WatchContent(text=text, category=category)
+                session.add(content)
+                try:
+                    session.commit()
+                    flash("关注内容已添加", "success")
+                    return redirect(url_for("list_contents", category_id=category.id))
+                except Exception:  # noqa: BLE001
+                    session.rollback()
+                    flash("该分类下已存在相同的关注内容", "warning")
+        selected_category_id = category_id or selected_category_id
+
+    return render_template(
+        "contents/form.html",
+        categories=categories,
+        selected_category_id=selected_category_id,
+    )
 
 
 @app.route("/contents/<int:content_id>/delete", methods=["POST"])
 def delete_content(content_id: int) -> Any:
     session = SessionLocal()
     content = session.get(WatchContent, content_id)
+    category_id = content.category_id if content else None
     if content:
         session.delete(content)
         session.commit()
         flash("关注内容已删除", "success")
-    return redirect(url_for("list_contents"))
+    return redirect(url_for("list_contents", category_id=category_id))
 
 
 @app.route("/tasks")
 def list_tasks() -> Any:
     session = SessionLocal()
-    tasks = session.query(MonitorTask).order_by(MonitorTask.created_at.desc()).all()
+    tasks = (
+        session.query(MonitorTask)
+        .options(
+            selectinload(MonitorTask.watch_contents).selectinload(WatchContent.category),
+            selectinload(MonitorTask.website),
+        )
+        .order_by(MonitorTask.created_at.desc())
+        .all()
+    )
     websites = session.query(Website).all()
-    contents = session.query(WatchContent).all()
-    return render_template("tasks/list.html", tasks=tasks, websites=websites, contents=contents)
+    return render_template("tasks/list.html", tasks=tasks, websites=websites)
 
 
 @app.route("/tasks/new", methods=["GET", "POST"])
 def create_task() -> Any:
     session = SessionLocal()
     websites = session.query(Website).all()
-    contents = session.query(WatchContent).all()
+    categories = (
+        session.query(ContentCategory)
+        .options(selectinload(ContentCategory.contents))
+        .order_by(ContentCategory.name)
+        .all()
+    )
+    has_contents = any(category.contents for category in categories)
     if request.method == "POST":
         name = request.form.get("name", "").strip()
         website_id = int(request.form.get("website_id", "0") or 0)
@@ -185,7 +353,12 @@ def create_task() -> Any:
             session.commit()
             flash("监控任务已创建", "success")
             return redirect(url_for("list_tasks"))
-    return render_template("tasks/form.html", websites=websites, contents=contents)
+    return render_template(
+        "tasks/form.html",
+        websites=websites,
+        categories=categories,
+        has_contents=has_contents,
+    )
 
 
 @app.route("/tasks/<int:task_id>/toggle", methods=["POST"])
@@ -251,6 +424,12 @@ def list_results() -> Any:
     if end_date:
         query = query.filter(CrawlResult.created_at <= datetime.fromisoformat(end_date))
 
+    query = query.options(
+        selectinload(CrawlResult.task),
+        selectinload(CrawlResult.website),
+        selectinload(CrawlResult.content).selectinload(WatchContent.category),
+    )
+
     page = int(request.args.get("page", "1") or 1)
     per_page = 10
     total = query.count()
@@ -265,14 +444,19 @@ def list_results() -> Any:
 
     tasks = session.query(MonitorTask).all()
     websites = session.query(Website).all()
-    contents = session.query(WatchContent).all()
+    categories = (
+        session.query(ContentCategory)
+        .options(selectinload(ContentCategory.contents))
+        .order_by(ContentCategory.name)
+        .all()
+    )
 
     return render_template(
         "results/list.html",
         results=results,
         tasks=tasks,
         websites=websites,
-        contents=contents,
+        categories=categories,
         page=page,
         total_pages=total_pages,
         query_args={

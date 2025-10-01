@@ -1,0 +1,13 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>批量编辑「{{ category.name }}」关注内容</h2>
+<form method="post" class="mt-3">
+  <div class="mb-3">
+    <label class="form-label">一行一条关注内容（最多50个字符）</label>
+    <textarea class="form-control" name="bulk_text" rows="12" placeholder="请输入关注内容，每行一条">{{ bulk_text }}</textarea>
+    <div class="form-text">提交后将覆盖该分类下的关注内容列表，空白行会被忽略。</div>
+  </div>
+  <button class="btn btn-primary" type="submit">保存</button>
+  <a class="btn btn-secondary" href="{{ url_for('list_contents', category_id=category.id) }}">返回</a>
+</form>
+{% endblock %}
