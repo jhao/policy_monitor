@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import smtplib
 from dataclasses import dataclass
+import logging
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Any, Iterable
@@ -12,6 +13,9 @@ from flask import current_app
 
 from database import SessionLocal
 from models import NotificationSetting
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class NotificationConfigError(RuntimeError):
@@ -102,10 +106,14 @@ def send_email(
 ) -> None:
     settings = _load_email_settings()
 
+    recipient_list = list(recipients)
+    if not recipient_list:
+        raise NotificationConfigError("未提供收件人，无法发送邮件")
+
     message = MIMEMultipart("alternative")
     message["Subject"] = subject
     message["From"] = settings.sender
-    message["To"] = ", ".join(recipients)
+    message["To"] = ", ".join(recipient_list)
 
     if text_body is None:
         text_body = html_body
@@ -113,15 +121,25 @@ def send_email(
     message.attach(MIMEText(text_body, "plain", "utf-8"))
     message.attach(MIMEText(html_body, "html", "utf-8"))
 
+    LOGGER.info(
+        "Sending email via %s:%s as %s to %s",
+        settings.host,
+        settings.port,
+        settings.sender,
+        ", ".join(recipient_list),
+    )
     with smtplib.SMTP(settings.host, settings.port) as server:
         if settings.use_tls:
             server.starttls()
         server.login(settings.username, settings.password)
-        server.sendmail(settings.sender, recipients, message.as_string())
+        server.sendmail(settings.sender, recipient_list, message.as_string())
+    LOGGER.info("Email sent successfully: %s", subject)
 
 
 def send_dingtalk_message(payload: dict[str, Any]) -> str:
     webhook_url = _get_dingtalk_webhook()
+    LOGGER.info("Sending DingTalk message to %s", webhook_url)
     response = requests.post(webhook_url, json=payload, timeout=10)
     response.raise_for_status()
+    LOGGER.info("DingTalk message sent successfully")
     return webhook_url

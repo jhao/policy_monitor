@@ -8,6 +8,11 @@ from flask import Flask, flash, jsonify, redirect, render_template, request, url
 from sqlalchemy.orm import joinedload, selectinload
 
 from crawler import SIMILARITY_THRESHOLD, parse_snapshot, run_task
+from email_utils import (
+    NotificationConfigError,
+    send_dingtalk_message,
+    send_email,
+)
 from database import SessionLocal, init_db
 from models import (
     ContentCategory,
@@ -404,6 +409,50 @@ def manage_notifications() -> Any:
 
         if request.method == "POST":
             config_type = request.form.get("config_type")
+            action = request.form.get("action", "save")
+            if config_type == "email" and action == "test":
+                recipient = request.form.get("test_recipient", "").strip()
+                fallback_recipient = None
+                if email_setting:
+                    fallback_recipient = (
+                        email_setting.smtp_sender or email_setting.smtp_username
+                    )
+                target_recipient = recipient or fallback_recipient
+                if not target_recipient:
+                    flash("请先保存 SMTP 配置或填写测试收件人", "danger")
+                else:
+                    try:
+                        send_email(
+                            subject="【测试】政策监控通知",
+                            recipients=[target_recipient],
+                            html_body="<p>这是一封测试邮件，用于验证通知配置是否生效。</p>",
+                            text_body="这是一封测试邮件，用于验证通知配置是否生效。",
+                        )
+                    except NotificationConfigError as exc:
+                        flash(f"测试邮件发送失败：{exc}", "danger")
+                    except Exception as exc:  # noqa: BLE001
+                        flash(f"测试邮件发送失败：{exc}", "danger")
+                    else:
+                        flash(
+                            f"测试邮件已发送至 {target_recipient}",
+                            "success",
+                        )
+                return redirect(url_for("manage_notifications"))
+            if config_type == "dingtalk" and action == "test":
+                try:
+                    send_dingtalk_message(
+                        {
+                            "msgtype": "text",
+                            "text": {"content": "【测试】政策监控钉钉通知已触发"},
+                        }
+                    )
+                except NotificationConfigError as exc:
+                    flash(f"测试钉钉通知失败：{exc}", "danger")
+                except Exception as exc:  # noqa: BLE001
+                    flash(f"测试钉钉通知失败：{exc}", "danger")
+                else:
+                    flash("测试钉钉通知已发送", "success")
+                return redirect(url_for("manage_notifications"))
             if config_type == "email":
                 smtp_host = request.form.get("smtp_host", "").strip()
                 smtp_port_raw = request.form.get("smtp_port", "").strip()
