@@ -90,18 +90,22 @@ def notify(
     text_body = f"监控任务 {task.name} 发现匹配内容: {title or '未提供'} - {url}\n摘要: {summary}"
 
     if task.notification_method == "dingtalk":
-        markdown_rows = "\n".join(
-            f"- **{content.text}** 相似度：{score:.2f}" for content, score in matches
-        )
-        markdown = (
-            f"### 监控任务：{task.name}\n"
-            f"发现新的内容匹配关注项：\n{markdown_rows}\n\n"
-            f"**标题：** {title or '未提供'}\n\n"
-            f"**链接：** {url}\n\n"
-            f"**摘要：** {summary}"
-        )
+        content_lines = [f"监控任务：{task.name}"]
+        if matches:
+            content_lines.append("发现新的内容匹配关注项：")
+            for watch_content, score in matches:
+                content_lines.append(f"- {watch_content.text}（相似度 {score:.2f}）")
+        else:
+            content_lines.append("发现新的内容：")
+        content_lines.append(f"标题：{title or '未提供'}")
+        content_lines.append(f"摘要：{summary}")
+        content = "\n".join(content_lines)
         try:
-            send_dingtalk_message(title=f"监控任务 {task.name} 有新内容", markdown=markdown)
+            send_dingtalk_message(
+                title=f"监控任务 {task.name} 有新内容",
+                content=content,
+                url=url,
+            )
         except NotificationConfigError:
             LOGGER.warning("钉钉通知配置缺失，任务 %s 无法发送", task.id)
         except Exception:  # noqa: BLE001

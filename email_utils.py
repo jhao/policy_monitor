@@ -120,14 +120,12 @@ def send_email(
         server.sendmail(settings.sender, recipients, message.as_string())
 
 
-def send_dingtalk_message(title: str, markdown: str) -> None:
+def send_dingtalk_message(title: str, content: str, url: str | None = None) -> None:
     webhook_url = _get_dingtalk_webhook()
     payload = {
-        "msgtype": "markdown",
-        "markdown": {
-            "title": title,
-            "text": markdown,
-        },
+        "title": title,
+        "content": content,
+        "url": url or "",
     }
     response = requests.post(webhook_url, json=payload, timeout=10)
     response.raise_for_status()
