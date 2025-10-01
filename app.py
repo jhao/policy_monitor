@@ -14,6 +14,7 @@ from models import (
     CrawlLog,
     CrawlResult,
     MonitorTask,
+    NotificationSetting，
     WatchContent,
     Website,
 )
@@ -22,15 +23,7 @@ from scheduler import MonitorScheduler
 logging.basicConfig(level=logging.INFO)
 
 app = Flask(__name__)
-app.config.update(
-    SECRET_KEY="monitor-secret-key",
-    SMTP_HOST="smtp.example.com",
-    SMTP_PORT="587",
-    SMTP_USERNAME="user@example.com",
-    SMTP_PASSWORD="password",
-    SMTP_USE_TLS="true",
-    SMTP_SENDER="monitor@example.com",
-)
+app.config.update(SECRET_KEY="monitor-secret-key")
 
 scheduler = MonitorScheduler()
 _setup_complete = False
@@ -309,6 +302,75 @@ def delete_content(content_id: int) -> Any:
     return redirect(url_for("list_contents", category_id=category_id))
 
 
+@app.route("/notifications", methods=["GET", "POST"])
+def manage_notifications() -> Any:
+    session = SessionLocal()
+    email_setting = (
+        session.query(NotificationSetting)
+        .filter(NotificationSetting.channel == "email")
+        .one_or_none()
+    )
+    dingtalk_setting = (
+        session.query(NotificationSetting)
+        .filter(NotificationSetting.channel == "dingtalk")
+        .one_or_none()
+    )
+
+    if request.method == "POST":
+        config_type = request.form.get("config_type")
+        if config_type == "email":
+            smtp_host = request.form.get("smtp_host", "").strip()
+            smtp_port_raw = request.form.get("smtp_port", "").strip()
+            smtp_username = request.form.get("smtp_username", "").strip()
+            smtp_password = request.form.get("smtp_password", "").strip()
+            smtp_sender = request.form.get("smtp_sender", "").strip()
+            smtp_use_tls = request.form.get("smtp_use_tls") == "on"
+
+            port_value: int | None = None
+            if smtp_port_raw:
+                try:
+                    port_value = int(smtp_port_raw)
+                except ValueError:
+                    flash("SMTP端口必须为数字", "danger")
+                    return render_template(
+                        "notifications/manage.html",
+                        email_setting=email_setting,
+                        dingtalk_setting=dingtalk_setting,
+                    )
+
+            if not (smtp_host and smtp_username and smtp_password):
+                flash("请完整填写SMTP主机、账号和密码", "danger")
+            else:
+                setting = email_setting or NotificationSetting(channel="email")
+                setting.smtp_host = smtp_host
+                setting.smtp_port = port_value if port_value is not None else 587
+                setting.smtp_username = smtp_username
+                setting.smtp_password = smtp_password
+                setting.smtp_sender = smtp_sender or smtp_username
+                setting.smtp_use_tls = smtp_use_tls
+                session.add(setting)
+                session.commit()
+                email_setting = setting
+                flash("SMTP配置已更新", "success")
+        elif config_type == "dingtalk":
+            webhook_url = request.form.get("webhook_url", "").strip()
+            if not webhook_url:
+                flash("请填写钉钉Webhook地址", "danger")
+            else:
+                setting = dingtalk_setting or NotificationSetting(channel="dingtalk")
+                setting.webhook_url = webhook_url
+                session.add(setting)
+                session.commit()
+                dingtalk_setting = setting
+                flash("钉钉配置已更新", "success")
+
+    return render_template(
+        "notifications/manage.html",
+        email_setting=email_setting,
+        dingtalk_setting=dingtalk_setting,
+    )
+
+
 @app.route("/tasks")
 def list_tasks() -> Any:
     session = SessionLocal()
@@ -339,12 +401,31 @@ def create_task() -> Any:
     if request.method == "POST":
         name = request.form.get("name", "").strip()
         website_id = int(request.form.get("website_id", "0") or 0)
-        notification_email = request.form.get("notification_email", "").strip()
-        selected_content_ids = request.form.getlist("content_ids")
-        if not (name and website_id and notification_email and selected_content_ids):
-            flash("请完整填写任务信息", "danger")
+        notification_method = request.form.get("notification_method", "email").strip() or "email"
+        notification_email_raw = request.form.get("notification_email", "").strip()
+        selected_content_ids = [int(content_id) for content_id in request.form.getlist("content_ids")]
+
+        recipients = [email.strip() for email in notification_email_raw.replace(";", ",").split(",") if email.strip()]
+        form_data = {
+            "name": name,
+            "website_id": website_id,
+            "notification_method": notification_method,
+            "notification_email": notification_email_raw,
+        }
+
+        if not name or not website_id:
+            flash("请填写任务名称并选择网站", "danger")
+        elif not selected_content_ids:
+            flash("请至少选择一个关注内容", "danger")
+        elif notification_method == "email" and not recipients:
+            flash("请选择邮件通知时，请填写接收邮箱地址", "danger")
         else:
-            task = MonitorTask(name=name, website_id=website_id, notification_email=notification_email)
+            task = MonitorTask(
+                name=name,
+                website_id=website_id,
+                notification_method=notification_method,
+                notification_email=", ".join(recipients) if notification_method == "email" else "",
+            )
             for content_id in selected_content_ids:
                 content = session.get(WatchContent, int(content_id))
                 if content:

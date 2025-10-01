@@ -83,7 +83,8 @@ class MonitorTask(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     website_id: Mapped[int] = mapped_column(ForeignKey("websites.id"), nullable=False)
-    notification_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    notification_method: Mapped[str] = mapped_column(String(50), default="email")
+    notification_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -108,6 +109,21 @@ class MonitorTask(Base):
         cascade="all, delete-orphan",
         order_by="desc(CrawlResult.created_at)",
     )
+
+
+class NotificationSetting(Base):
+    __tablename__ = "notification_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    channel: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    smtp_host: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    smtp_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    smtp_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    smtp_password: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    smtp_use_tls: Mapped[bool] = mapped_column(Boolean, default=True)
+    smtp_sender: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    webhook_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class CrawlLog(Base):

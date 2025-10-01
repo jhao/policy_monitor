@@ -1,23 +1,34 @@
 {% extends 'base.html' %}
 {% block content %}
-<h2>新增监控任务</h2>
+{% set is_edit = task is not none %}
+<h2>{{ '编辑监控任务' if is_edit else '新增监控任务' }}</h2>
 <form method="post" class="mt-3">
   <div class="mb-3">
     <label class="form-label">任务名称</label>
-    <input type="text" class="form-control" name="name" required>
+    <input type="text" class="form-control" name="name" value="{{ form_data.get('name', '') }}" required>
   </div>
   <div class="mb-3">
     <label class="form-label">选择网站</label>
     <select class="form-select" name="website_id" required>
       <option value="">请选择</option>
       {% for website in websites %}
-        <option value="{{ website.id }}">{{ website.name }} ({{ website.interval_minutes }}分钟)</option>
+        {% set selected = form_data.get('website_id') %}
+        <option value="{{ website.id }}" {% if selected == website.id %}selected{% endif %}>{{ website.name }} ({{ website.interval_minutes }}分钟)</option>
       {% endfor %}
     </select>
   </div>
   <div class="mb-3">
+    <label class="form-label">通知方式</label>
+    {% set current_method = form_data.get('notification_method', 'email') %}
+    <select class="form-select" name="notification_method" id="notificationMethod">
+      <option value="email" {% if current_method == 'email' %}selected{% endif %}>邮件</option>
+      <option value="dingtalk" {% if current_method == 'dingtalk' %}selected{% endif %}>钉钉</option>
+    </select>
+  </div>
+  <div class="mb-3" id="emailGroup">
     <label class="form-label">通知邮箱</label>
-    <input type="email" class="form-control" name="notification_email" required>
+    <input type="text" class="form-control" name="notification_email" value="{{ form_data.get('notification_email', '') }}" {% if current_method != 'email' %}disabled{% endif %}>
+    <div class="form-text">多个邮箱请使用逗号或分号分隔。</div>
   </div>
   <div class="mb-3">
     <label class="form-label">选择关注内容（可多选）</label>
@@ -27,6 +38,7 @@
         <div class="d-flex justify-content-between align-items-center mb-2">
           <h6 class="mb-0">{{ category.name }}</h6>
           <a class="small" href="{{ url_for('bulk_edit_category_contents', category_id=category.id) }}">批量编辑</a>
+
         </div>
         {% if category.contents %}
         <div class="row g-2">
@@ -57,4 +69,18 @@
 {% if not has_contents %}
 <p class="text-muted">请先在关注内容清单中维护分类及关注内容。</p>
 {% endif %}
+<script>
+  const methodSelect = document.getElementById('notificationMethod');
+  const emailGroup = document.getElementById('emailGroup');
+  const emailInput = emailGroup.querySelector('input[name="notification_email"]');
+
+  function toggleEmailField() {
+    const isEmail = methodSelect.value === 'email';
+    emailGroup.style.display = isEmail ? 'block' : 'none';
+    emailInput.disabled = !isEmail;
+  }
+
+  methodSelect.addEventListener('change', toggleEmailField);
+  toggleEmailField();
+</script>
 {% endblock %}
