@@ -19,8 +19,17 @@ except ImportError:  # pragma: no cover - optional dependency
     lxml_html = None  # type: ignore[assignment]
 
 from database import SessionLocal
+from sqlalchemy.orm import Session
 from email_utils import NotificationConfigError, send_dingtalk_message, send_email
-from models import CrawlLog, CrawlLogDetail, CrawlResult, MonitorTask, WatchContent, Website
+from models import (
+    CrawlLog,
+    CrawlLogDetail,
+    CrawlResult,
+    MonitorTask,
+    NotificationLog,
+    WatchContent,
+    Website,
+)
 
 from nlp import similarity
 
@@ -557,7 +566,30 @@ def _build_notification_email_html(task: MonitorTask, items: list[dict[str, str]
     return "".join(blocks)
 
 
-def _send_task_notifications(task: MonitorTask, payload_items: list[dict[str, str]]) -> None:
+def _record_notification_log(
+    session: Session,
+    task: MonitorTask,
+    channel: str,
+    target: str | None,
+    status: str,
+    message: str | None,
+) -> None:
+    log_entry = NotificationLog(
+        task=task,
+        channel=channel,
+        target=target,
+        status=status,
+        message=message,
+    )
+    session.add(log_entry)
+    session.commit()
+
+
+def _send_task_notifications(
+    session: Session,
+    task: MonitorTask,
+    payload_items: list[dict[str, str]],
+) -> None:
     if task.notification_method == "dingtalk":
         links = [
             {
@@ -568,17 +600,42 @@ def _send_task_notifications(task: MonitorTask, payload_items: list[dict[str, st
             for item in payload_items
         ]
         try:
-            send_dingtalk_message(
+            webhook_url = send_dingtalk_message(
                 {
                     "msgtype": "feedCard",
                     "title": f"监控任务：{task.name}",
                     "feedCard": {"links": links},
                 }
             )
-        except NotificationConfigError:
+        except NotificationConfigError as exc:
             LOGGER.warning("钉钉通知配置缺失，任务 %s 无法发送", task.id)
-        except Exception:  # noqa: BLE001
+            _record_notification_log(
+                session,
+                task,
+                channel="dingtalk",
+                target=None,
+                status="failed",
+                message=str(exc) or "钉钉通知配置缺失",
+            )
+        except Exception as exc:  # noqa: BLE001
             LOGGER.exception("任务 %s 发送钉钉通知失败", task.id)
+            _record_notification_log(
+                session,
+                task,
+                channel="dingtalk",
+                target=None,
+                status="failed",
+                message=str(exc) or "钉钉通知发送失败",
+            )
+        else:
+            _record_notification_log(
+                session,
+                task,
+                channel="dingtalk",
+                target=webhook_url,
+                status="success",
+                message=f"已成功发送 {len(payload_items)} 条更新",
+            )
         return
 
     recipients = [
@@ -588,6 +645,14 @@ def _send_task_notifications(task: MonitorTask, payload_items: list[dict[str, st
     ]
     if not recipients:
         LOGGER.warning("Task %s has no notification email", task.id)
+        _record_notification_log(
+            session,
+            task,
+            channel="email",
+            target=None,
+            status="failed",
+            message="未配置通知邮箱",
+        )
         return
 
     html_body = _build_notification_email_html(task, payload_items)
@@ -606,10 +671,35 @@ def _send_task_notifications(task: MonitorTask, payload_items: list[dict[str, st
             html_body=html_body,
             text_body="\n".join(text_lines),
         )
-    except NotificationConfigError:
+    except NotificationConfigError as exc:
         LOGGER.warning("邮件通知配置缺失，任务 %s 无法发送", task.id)
-    except Exception:  # noqa: BLE001
+        _record_notification_log(
+            session,
+            task,
+            channel="email",
+            target=", ".join(recipients),
+            status="failed",
+            message=str(exc) or "邮件通知配置缺失",
+        )
+    except Exception as exc:  # noqa: BLE001
         LOGGER.exception("任务 %s 发送邮件失败", task.id)
+        _record_notification_log(
+            session,
+            task,
+            channel="email",
+            target=", ".join(recipients),
+            status="failed",
+            message=str(exc) or "邮件发送失败",
+        )
+    else:
+        _record_notification_log(
+            session,
+            task,
+            channel="email",
+            target=", ".join(recipients),
+            status="success",
+            message=f"已成功发送 {len(payload_items)} 条更新",
+        )
 
 
 def run_task(task_id: int) -> None:
@@ -800,7 +890,7 @@ def run_task(task_id: int) -> None:
                         "pic": image_url,
                     }
                 )
-            _send_task_notifications(task, payload_items)
+            _send_task_notifications(session, task, payload_items)
     except Exception as exc:  # noqa: BLE001
         session.rollback()
         LOGGER.exception("Task %s failed", task_id)

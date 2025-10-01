@@ -14,6 +14,7 @@ from models import (
     CrawlLog,
     CrawlResult,
     MonitorTask,
+    NotificationLog,
     NotificationSetting,
     WatchContent,
     Website,
@@ -35,6 +36,17 @@ _setup_complete = False
 @app.template_filter("format_datetime")
 def format_datetime_filter(value: datetime | None) -> str:
     return format_local_datetime(value)
+
+
+@app.context_processor
+def inject_timezone_context() -> dict[str, str]:
+    tz = get_local_timezone()
+    now = datetime.now(tz)
+    tz_name = tz.tzname(now) if hasattr(tz, "tzname") else None
+    tz_display = now.strftime("%Z%z") if now.tzinfo else "UTC"
+    if tz_name and tz_name not in tz_display:
+        tz_display = f"{tz_name} ({tz_display})"
+    return {"current_timezone_display": tz_display}
 
 
 def ensure_setup() -> None:
@@ -375,70 +387,93 @@ def delete_content(content_id: int) -> Any:
 @app.route("/notifications", methods=["GET", "POST"])
 def manage_notifications() -> Any:
     session = SessionLocal()
-    email_setting = (
-        session.query(NotificationSetting)
-        .filter(NotificationSetting.channel == "email")
-        .one_or_none()
-    )
-    dingtalk_setting = (
-        session.query(NotificationSetting)
-        .filter(NotificationSetting.channel == "dingtalk")
-        .one_or_none()
-    )
+    try:
+        email_setting = (
+            session.query(NotificationSetting)
+            .filter(NotificationSetting.channel == "email")
+            .one_or_none()
+        )
+        dingtalk_setting = (
+            session.query(NotificationSetting)
+            .filter(NotificationSetting.channel == "dingtalk")
+            .one_or_none()
+        )
 
-    if request.method == "POST":
-        config_type = request.form.get("config_type")
-        if config_type == "email":
-            smtp_host = request.form.get("smtp_host", "").strip()
-            smtp_port_raw = request.form.get("smtp_port", "").strip()
-            smtp_username = request.form.get("smtp_username", "").strip()
-            smtp_password = request.form.get("smtp_password", "").strip()
-            smtp_sender = request.form.get("smtp_sender", "").strip()
-            smtp_use_tls = request.form.get("smtp_use_tls") == "on"
+        page = request.args.get("page", 1, type=int)
+        per_page = 10
 
-            port_value: int | None = None
-            if smtp_port_raw:
-                try:
-                    port_value = int(smtp_port_raw)
-                except ValueError:
-                    flash("SMTP端口必须为数字", "danger")
-                    return render_template(
-                        "notifications/manage.html",
-                        email_setting=email_setting,
-                        dingtalk_setting=dingtalk_setting,
-                    )
+        if request.method == "POST":
+            config_type = request.form.get("config_type")
+            if config_type == "email":
+                smtp_host = request.form.get("smtp_host", "").strip()
+                smtp_port_raw = request.form.get("smtp_port", "").strip()
+                smtp_username = request.form.get("smtp_username", "").strip()
+                smtp_password = request.form.get("smtp_password", "").strip()
+                smtp_sender = request.form.get("smtp_sender", "").strip()
+                smtp_use_tls = request.form.get("smtp_use_tls") == "on"
 
-            if not (smtp_host and smtp_username and smtp_password):
-                flash("请完整填写SMTP主机、账号和密码", "danger")
-            else:
-                setting = email_setting or NotificationSetting(channel="email")
-                setting.smtp_host = smtp_host
-                setting.smtp_port = port_value if port_value is not None else 587
-                setting.smtp_username = smtp_username
-                setting.smtp_password = smtp_password
-                setting.smtp_sender = smtp_sender or smtp_username
-                setting.smtp_use_tls = smtp_use_tls
-                session.add(setting)
-                session.commit()
-                email_setting = setting
-                flash("SMTP配置已更新", "success")
-        elif config_type == "dingtalk":
-            webhook_url = request.form.get("webhook_url", "").strip()
-            if not webhook_url:
-                flash("请填写钉钉Webhook地址", "danger")
-            else:
-                setting = dingtalk_setting or NotificationSetting(channel="dingtalk")
-                setting.webhook_url = webhook_url
-                session.add(setting)
-                session.commit()
-                dingtalk_setting = setting
-                flash("钉钉配置已更新", "success")
+                port_value: int | None = None
+                has_error = False
+                if smtp_port_raw:
+                    try:
+                        port_value = int(smtp_port_raw)
+                    except ValueError:
+                        has_error = True
+                        flash("SMTP端口必须为数字", "danger")
 
-    return render_template(
-        "notifications/manage.html",
-        email_setting=email_setting,
-        dingtalk_setting=dingtalk_setting,
-    )
+                if not (smtp_host and smtp_username and smtp_password):
+                    has_error = True
+                    flash("请完整填写SMTP主机、账号和密码", "danger")
+
+                if not has_error:
+                    setting = email_setting or NotificationSetting(channel="email")
+                    setting.smtp_host = smtp_host
+                    setting.smtp_port = port_value if port_value is not None else 587
+                    setting.smtp_username = smtp_username
+                    setting.smtp_password = smtp_password
+                    setting.smtp_sender = smtp_sender or smtp_username
+                    setting.smtp_use_tls = smtp_use_tls
+                    session.add(setting)
+                    session.commit()
+                    flash("SMTP配置已更新", "success")
+                    return redirect(url_for("manage_notifications"))
+            elif config_type == "dingtalk":
+                webhook_url = request.form.get("webhook_url", "").strip()
+                if not webhook_url:
+                    flash("请填写钉钉Webhook地址", "danger")
+                else:
+                    setting = dingtalk_setting or NotificationSetting(channel="dingtalk")
+                    setting.webhook_url = webhook_url
+                    session.add(setting)
+                    session.commit()
+                    flash("钉钉配置已更新", "success")
+                    return redirect(url_for("manage_notifications"))
+
+        log_query = session.query(NotificationLog).order_by(NotificationLog.created_at.desc())
+        total_logs = log_query.count()
+        total_pages = max((total_logs + per_page - 1) // per_page, 1)
+        if page < 1:
+            page = 1
+        if page > total_pages:
+            page = total_pages
+        logs = (
+            log_query.offset((page - 1) * per_page)
+            .limit(per_page)
+            .all()
+        )
+
+        return render_template(
+            "notifications/manage.html",
+            email_setting=email_setting,
+            dingtalk_setting=dingtalk_setting,
+            notification_logs=logs,
+            log_page=page,
+            log_total_pages=total_pages,
+            log_total=total_logs,
+            log_per_page=per_page,
+        )
+    finally:
+        session.close()
 
 
 @app.route("/tasks")
@@ -785,7 +820,7 @@ def stream_task_log_entries(task_id: int, log_id: int) -> Any:
     entries = [
         {
             "id": entry.id,
-            "created_at": entry.created_at.isoformat() if entry.created_at else None,
+            "created_at": format_local_datetime(entry.created_at) if entry.created_at else None,
             "level": entry.level,
             "message": entry.message,
         }
@@ -795,8 +830,8 @@ def stream_task_log_entries(task_id: int, log_id: int) -> Any:
     response = {
         "log_id": log.id,
         "status": log.status,
-        "run_started_at": log.run_started_at.isoformat() if log.run_started_at else None,
-        "run_finished_at": log.run_finished_at.isoformat() if log.run_finished_at else None,
+        "run_started_at": format_local_datetime(log.run_started_at) if log.run_started_at else None,
+        "run_finished_at": format_local_datetime(log.run_finished_at) if log.run_finished_at else None,
         "message": log.message,
         "entries": entries,
     }
