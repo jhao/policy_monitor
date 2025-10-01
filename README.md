@@ -23,9 +23,18 @@
 1. **安装依赖**
 
    ```bash
-   python -m venv .venv
+   python3 -m venv .venv
    source .venv/bin/activate  # Windows 使用 .venv\Scripts\activate
-   pip install -r requirements.txt
+   python -m pip install --upgrade pip
+   python -m pip install -r requirements.txt
+   ```
+
+   > 💡 为避免 `python`、`pip` 与 `flask` 指向不同解释器，请始终通过 `python -m ...` 的形式安装依赖和启动服务。
+
+   如需启用 BERT 语义模型，可额外安装（如当前 Python 版本支持）：
+
+   ```bash
+   python -m pip install sentence-transformers numpy scipy
    ```
 
 2. **配置 SMTP**
@@ -42,7 +51,7 @@
 3. **启动服务**
 
    ```bash
-   flask --app app run
+   python -m flask --app app run
    ```
 
    首次启动会自动初始化数据库并启动监控调度器。
@@ -61,7 +70,7 @@
 
 ## 注意事项
 
-- `sentence-transformers` 首次运行会下载预训练模型，需要能够访问 HuggingFace Hub。
+- 若未安装 `sentence-transformers`（例如在暂不提供相应轮子的 Python 3.13 环境），系统会回退到内置的模糊匹配算法，依然可以正常运行，只是相似度精度略低。若之后补充安装了 `sentence-transformers`，重新启动服务即可自动启用语义模型。
 - 如果站点页面结构复杂，可根据实际情况在 `crawler.py` 中扩展解析与差异检测逻辑。
 - 默认示例 SMTP 配置仅为占位，请务必使用真实的邮件服务账号。
 
