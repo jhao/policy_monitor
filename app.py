@@ -449,6 +449,85 @@ def create_task() -> Any:
         has_contents=has_contents,
         form_data=form_data,
         selected_content_ids=selected_content_ids,
+        task=None,
+    )
+
+
+@app.route("/tasks/<int:task_id>/edit", methods=["GET", "POST"])
+def edit_task(task_id: int) -> Any:
+    session = SessionLocal()
+    task = session.get(MonitorTask, task_id)
+    if not task:
+        flash("未找到任务", "danger")
+        return redirect(url_for("list_tasks"))
+
+    websites = session.query(Website).all()
+    categories = (
+        session.query(ContentCategory)
+        .options(selectinload(ContentCategory.contents))
+        .order_by(ContentCategory.name)
+        .all()
+    )
+    has_contents = any(category.contents for category in categories)
+
+    selected_content_ids: set[int] = {content.id for content in task.watch_contents}
+    form_data = {
+        "name": task.name,
+        "website_id": task.website_id,
+        "notification_method": task.notification_method,
+        "notification_email": task.notification_email or "",
+    }
+
+    if request.method == "POST":
+        name = request.form.get("name", "").strip()
+        website_id = int(request.form.get("website_id", "0") or 0)
+        notification_method = request.form.get("notification_method", "email").strip() or "email"
+        notification_email_raw = request.form.get("notification_email", "").strip()
+        selected_content_ids = {int(content_id) for content_id in request.form.getlist("content_ids")}
+
+        recipients = [
+            email.strip()
+            for email in notification_email_raw.replace(";", ",").split(",")
+            if email.strip()
+        ]
+        form_data = {
+            "name": name,
+            "website_id": website_id,
+            "notification_method": notification_method,
+            "notification_email": notification_email_raw,
+        }
+
+        if not name or not website_id:
+            flash("请填写任务名称并选择网站", "danger")
+        elif not selected_content_ids:
+            flash("请至少选择一个关注内容", "danger")
+        elif notification_method == "email" and not recipients:
+            flash("请选择邮件通知时，请填写接收邮箱地址", "danger")
+        else:
+            task.name = name
+            task.website_id = website_id
+            task.notification_method = notification_method
+            task.notification_email = (
+                ", ".join(recipients) if notification_method == "email" else ""
+            )
+            task.watch_contents.clear()
+            for content_id in selected_content_ids:
+                content = session.get(WatchContent, int(content_id))
+                if content:
+                    task.watch_contents.append(content)
+            session.add(task)
+            session.commit()
+            flash("监控任务已更新", "success")
+            return redirect(url_for("list_tasks"))
+
+    return render_template(
+        "tasks/form.html",
+        websites=websites,
+        categories=categories,
+        has_contents=has_contents,
+        form_data=form_data,
+        selected_content_ids=selected_content_ids,
+        task=task,
     )
 
 
