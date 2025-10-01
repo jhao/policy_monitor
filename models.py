@@ -13,6 +13,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -41,12 +42,33 @@ class Website(Base):
     tasks: Mapped[List["MonitorTask"]] = relationship("MonitorTask", back_populates="website")
 
 
-class WatchContent(Base):
-    __tablename__ = "watch_contents"
+class ContentCategory(Base):
+    __tablename__ = "content_categories"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    text: Mapped[str] = mapped_column(String(50), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    contents: Mapped[List["WatchContent"]] = relationship(
+        "WatchContent",
+        back_populates="category",
+        cascade="all, delete-orphan",
+        order_by="WatchContent.created_at.desc()",
+    )
+
+
+class WatchContent(Base):
+    __tablename__ = "watch_contents"
+    __table_args__ = (
+        UniqueConstraint("category_id", "text", name="uq_content_category_text"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    text: Mapped[str] = mapped_column(String(50), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    category_id: Mapped[int] = mapped_column(ForeignKey("content_categories.id"), nullable=False)
+
+    category: Mapped[ContentCategory] = relationship("ContentCategory", back_populates="contents")
 
     tasks: Mapped[List["MonitorTask"]] = relationship(
         "MonitorTask",
@@ -61,7 +83,8 @@ class MonitorTask(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     website_id: Mapped[int] = mapped_column(ForeignKey("websites.id"), nullable=False)
-    notification_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    notification_method: Mapped[str] = mapped_column(String(50), default="email")
+    notification_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -86,6 +109,21 @@ class MonitorTask(Base):
         cascade="all, delete-orphan",
         order_by="desc(CrawlResult.created_at)",
     )
+
+
+class NotificationSetting(Base):
+    __tablename__ = "notification_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    channel: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    smtp_host: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    smtp_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    smtp_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    smtp_password: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    smtp_use_tls: Mapped[bool] = mapped_column(Boolean, default=True)
+    smtp_sender: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    webhook_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class CrawlLog(Base):
@@ -135,3 +173,4 @@ class CrawlLogDetail(Base):
     message: Mapped[str] = mapped_column(Text, nullable=False)
 
     log: Mapped[CrawlLog] = relationship("CrawlLog", back_populates="entries")
+

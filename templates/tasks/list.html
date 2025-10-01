@@ -10,7 +10,8 @@
       <th>名称</th>
       <th>网站</th>
       <th>关注内容</th>
-      <th>通知邮箱</th>
+      <th>通知方式</th>
+      <th>通知配置</th>
       <th>最后执行</th>
       <th>状态</th>
       <th>操作</th>
@@ -23,13 +24,21 @@
       <td>{{ task.website.name if task.website else '未配置' }}</td>
       <td>
         {% for content in task.watch_contents %}
-          <span class="badge text-bg-secondary">{{ content.text }}</span>
+          <span class="badge text-bg-secondary">{{ content.category.name if content.category else '未分类' }}：{{ content.text }}</span>
         {% endfor %}
       </td>
-      <td>{{ task.notification_email }}</td>
+      <td>{% if task.notification_method == 'dingtalk' %}钉钉{% else %}邮件{% endif %}</td>
+      <td>
+        {% if task.notification_method == 'dingtalk' %}
+          钉钉群机器人
+        {% else %}
+          {{ task.notification_email or '未配置' }}
+        {% endif %}
+      </td>
       <td>{{ task.last_run_at or '尚未执行' }}</td>
       <td>{{ '运行中' if task.is_active else '已暂停' }} / {{ task.last_status or '未执行' }}</td>
       <td>
+        <a class="btn btn-sm btn-info" href="{{ url_for('edit_task', task_id=task.id) }}">编辑</a>
         <form action="{{ url_for('toggle_task', task_id=task.id) }}" method="post" class="d-inline">
           <button class="btn btn-sm btn-warning">{{ '暂停' if task.is_active else '启动' }}</button>
         </form>

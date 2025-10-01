@@ -7,7 +7,16 @@
     <span class="badge text-bg-secondary">{{ content.text }}</span>
   {% endfor %}
 </p>
-<p><strong>通知邮箱：</strong> {{ task.notification_email }}</p>
+<p><strong>通知方式：</strong>
+  {% if task.notification_method == 'dingtalk' %}
+    钉钉群机器人
+  {% else %}
+    邮件
+  {% endif %}
+</p>
+{% if task.notification_method == 'email' %}
+<p><strong>通知邮箱：</strong> {{ task.notification_email or '未配置' }}</p>
+{% endif %}
 <p><strong>任务状态：</strong> {{ '运行中' if task.is_active else '已暂停' }}，最近状态：{{ task.last_status or '无' }}</p>
 <p><strong>相似度阈值：</strong> {{ threshold }}</p>
 

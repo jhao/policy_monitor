@@ -9,8 +9,9 @@ import requests
 from bs4 import BeautifulSoup
 
 from database import SessionLocal
-from email_utils import send_email
+from email_utils import NotificationConfigError, send_dingtalk_message, send_email
 from models import CrawlLog, CrawlLogDetail, CrawlResult, MonitorTask, WatchContent
+
 from nlp import similarity
 
 SIMILARITY_THRESHOLD = 0.6
@@ -64,12 +65,13 @@ def score_contents(article_summary: str, contents: Iterable[WatchContent]) -> li
     return list(zip(contents, scores))
 
 
-def notify(task: MonitorTask, title: str, url: str, summary: str, matches: list[tuple[WatchContent, float]]) -> None:
-    recipient = task.notification_email
-    if not recipient:
-        LOGGER.warning("Task %s has no notification email", task.id)
-        return
-
+def notify(
+    task: MonitorTask,
+    title: str,
+    url: str,
+    summary: str,
+    matches: list[tuple[WatchContent, float]],
+) -> None:
     rows = "".join(
         f"<li><strong>{content.text}</strong> - 相似度: {score:.2f}</li>" for content, score in matches
     )
@@ -82,7 +84,42 @@ def notify(task: MonitorTask, title: str, url: str, summary: str, matches: list[
         <p><strong>摘要:</strong> {summary}</p>
     """
     text_body = f"监控任务 {task.name} 发现匹配内容: {title or '未提供'} - {url}\n摘要: {summary}"
-    send_email(subject=f"监控任务 {task.name} 有新内容", recipients=[recipient], html_body=html_body, text_body=text_body)
+
+    if task.notification_method == "dingtalk":
+        markdown_rows = "\n".join(
+            f"- **{content.text}** 相似度：{score:.2f}" for content, score in matches
+        )
+        markdown = (
+            f"### 监控任务：{task.name}\n"
+            f"发现新的内容匹配关注项：\n{markdown_rows}\n\n"
+            f"**标题：** {title or '未提供'}\n\n"
+            f"**链接：** {url}\n\n"
+            f"**摘要：** {summary}"
+        )
+        try:
+            send_dingtalk_message(title=f"监控任务 {task.name} 有新内容", markdown=markdown)
+        except NotificationConfigError:
+            LOGGER.warning("钉钉通知配置缺失，任务 %s 无法发送", task.id)
+        except Exception:  # noqa: BLE001
+            LOGGER.exception("任务 %s 发送钉钉通知失败", task.id)
+        return
+
+    recipients = [email.strip() for email in (task.notification_email or "").split(",") if email.strip()]
+    if not recipients:
+        LOGGER.warning("Task %s has no notification email", task.id)
+        return
+
+    try:
+        send_email(
+            subject=f"监控任务 {task.name} 有新内容",
+            recipients=recipients,
+            html_body=html_body,
+            text_body=text_body,
+        )
+    except NotificationConfigError:
+        LOGGER.warning("邮件通知配置缺失，任务 %s 无法发送", task.id)
+    except Exception:  # noqa: BLE001
+        LOGGER.exception("任务 %s 发送邮件失败", task.id)
 
 
 def run_task(task_id: int) -> None:
@@ -114,6 +151,8 @@ def run_task(task_id: int) -> None:
         new_html = fetch_html(website.url)
         add_detail("主页面抓取成功")
         matched_results: list[tuple[str, str, str, list[tuple[WatchContent, float]]]] = []
+
+        subpage_errors: list[str] = []
 
         if website.fetch_subpages:
             new_links = compare_links(website.last_snapshot, new_html, website.url)
@@ -197,7 +236,10 @@ def run_task(task_id: int) -> None:
 
         log_entry.status = task.last_status
         log_entry.run_finished_at = datetime.utcnow()
-        log_entry.message = f"发现匹配结果 {len(matched_results)} 条"
+        message_parts = [f"发现匹配结果 {len(matched_results)} 条"]
+        if subpage_errors:
+            message_parts.append(f"子链接抓取失败 {len(subpage_errors)} 个: {'; '.join(subpage_errors)}")
+        log_entry.message = "；".join(message_parts)
         session.add(log_entry)
         session.commit()
 

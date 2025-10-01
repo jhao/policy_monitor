@@ -9,21 +9,21 @@ from sqlalchemy.orm import joinedload
 
 from crawler import SIMILARITY_THRESHOLD
 from database import SessionLocal, init_db
-from models import CrawlLog, CrawlResult, MonitorTask, WatchContent, Website
+from models import (
+    ContentCategory,
+    CrawlLog,
+    CrawlResult,
+    MonitorTask,
+    NotificationSetting，
+    WatchContent,
+    Website,
+)
 from scheduler import MonitorScheduler
 
 logging.basicConfig(level=logging.INFO)
 
 app = Flask(__name__)
-app.config.update(
-    SECRET_KEY="monitor-secret-key",
-    SMTP_HOST="smtp.example.com",
-    SMTP_PORT="587",
-    SMTP_USERNAME="user@example.com",
-    SMTP_PASSWORD="password",
-    SMTP_USE_TLS="true",
-    SMTP_SENDER="monitor@example.com",
-)
+app.config.update(SECRET_KEY="monitor-secret-key")
 
 scheduler = MonitorScheduler()
 _setup_complete = False
@@ -118,66 +118,314 @@ def delete_website(website_id: int) -> Any:
 @app.route("/contents")
 def list_contents() -> Any:
     session = SessionLocal()
-    contents = session.query(WatchContent).order_by(WatchContent.created_at.desc()).all()
-    return render_template("contents/list.html", contents=contents)
+    categories = (
+        session.query(ContentCategory)
+        .options(selectinload(ContentCategory.contents))
+        .order_by(ContentCategory.name)
+        .all()
+    )
+    total_count = session.query(WatchContent).count()
+    selected_category_id = request.args.get("category_id", type=int)
+    selected_category = None
+
+    query = (
+        session.query(WatchContent)
+        .options(selectinload(WatchContent.category))
+        .order_by(WatchContent.created_at.desc())
+    )
+    if selected_category_id:
+        selected_category = next(
+            (category for category in categories if category.id == selected_category_id),
+            None,
+        )
+        if not selected_category:
+            flash("选择的分类不存在", "warning")
+            return redirect(url_for("list_contents"))
+        query = query.filter(WatchContent.category_id == selected_category_id)
+
+    contents = query.all()
+    return render_template(
+        "contents/list.html",
+        contents=contents,
+        categories=categories,
+        selected_category=selected_category,
+        selected_category_id=selected_category_id,
+        total_count=total_count,
+    )
+
+
+@app.route("/content-categories", methods=["POST"])
+def create_content_category() -> Any:
+    session = SessionLocal()
+    name = request.form.get("name", "").strip()
+    if not name:
+        flash("请输入分类名称", "danger")
+        return redirect(url_for("list_contents"))
+
+    category = ContentCategory(name=name)
+    session.add(category)
+    try:
+        session.commit()
+        flash("分类已创建", "success")
+    except Exception:  # noqa: BLE001
+        session.rollback()
+        flash("分类名称已存在", "warning")
+    return redirect(url_for("list_contents"))
+
+
+@app.route("/content-categories/<int:category_id>/delete", methods=["POST"])
+def delete_content_category(category_id: int) -> Any:
+    session = SessionLocal()
+    category = session.get(ContentCategory, category_id)
+    if not category:
+        flash("分类不存在", "warning")
+        return redirect(url_for("list_contents"))
+
+    if category.contents:
+        flash("请先清空该分类下的关注内容", "warning")
+        return redirect(url_for("list_contents", category_id=category.id))
+
+    session.delete(category)
+    session.commit()
+    flash("分类已删除", "success")
+    return redirect(url_for("list_contents"))
+
+
+@app.route("/content-categories/<int:category_id>/bulk", methods=["GET", "POST"])
+def bulk_edit_category_contents(category_id: int) -> Any:
+    session = SessionLocal()
+    category = session.get(ContentCategory, category_id)
+    if not category:
+        flash("未找到分类", "danger")
+        return redirect(url_for("list_contents"))
+
+    if request.method == "POST":
+        raw_text = request.form.get("bulk_text", "")
+        lines = [line.strip() for line in raw_text.splitlines()]
+        new_texts: list[str] = []
+        unique_texts: set[str] = set()
+
+        for line in lines:
+            if not line:
+                continue
+            if len(line) > 50:
+                flash("每条关注内容不能超过50个字符", "danger")
+                return render_template(
+                    "contents/bulk_edit.html",
+                    category=category,
+                    bulk_text=raw_text,
+                )
+            if line in unique_texts:
+                continue
+            unique_texts.add(line)
+            new_texts.append(line)
+
+        existing_by_text = {content.text: content for content in list(category.contents)}
+
+        for text, content in existing_by_text.items():
+            if text not in unique_texts:
+                session.delete(content)
+
+        for text in new_texts:
+            if text not in existing_by_text:
+                session.add(WatchContent(text=text, category=category))
+
+        try:
+            session.commit()
+            flash("分类关注内容已更新", "success")
+            return redirect(url_for("list_contents", category_id=category.id))
+        except Exception:  # noqa: BLE001
+            session.rollback()
+            flash("保存关注内容时发生错误，请检查是否存在重复记录", "danger")
+            return render_template(
+                "contents/bulk_edit.html",
+                category=category,
+                bulk_text=raw_text,
+            )
+
+    bulk_text = "\n".join(content.text for content in sorted(category.contents, key=lambda c: c.created_at))
+    return render_template("contents/bulk_edit.html", category=category, bulk_text=bulk_text)
 
 
 @app.route("/contents/new", methods=["GET", "POST"])
 def create_content() -> Any:
     session = SessionLocal()
+    categories = (
+        session.query(ContentCategory)
+        .options(selectinload(ContentCategory.contents))
+        .order_by(ContentCategory.name)
+        .all()
+    )
+    selected_category_id = request.args.get("category_id", type=int)
+
     if request.method == "POST":
         text = request.form.get("text", "").strip()
+        category_id = request.form.get("category_id", type=int)
         if not text:
             flash("请输入关注内容", "danger")
         elif len(text) > 50:
             flash("关注内容不能超过50个字符", "danger")
+        elif not category_id:
+            flash("请选择分类", "danger")
         else:
-            content = WatchContent(text=text)
-            session.add(content)
-            try:
-                session.commit()
-                flash("关注内容已添加", "success")
-                return redirect(url_for("list_contents"))
-            except Exception:  # noqa: BLE001
-                session.rollback()
-                flash("关注内容已存在", "warning")
-    return render_template("contents/form.html")
+            category = session.get(ContentCategory, category_id)
+            if not category:
+                flash("分类不存在", "danger")
+            else:
+                content = WatchContent(text=text, category=category)
+                session.add(content)
+                try:
+                    session.commit()
+                    flash("关注内容已添加", "success")
+                    return redirect(url_for("list_contents", category_id=category.id))
+                except Exception:  # noqa: BLE001
+                    session.rollback()
+                    flash("该分类下已存在相同的关注内容", "warning")
+        selected_category_id = category_id or selected_category_id
+
+    return render_template(
+        "contents/form.html",
+        categories=categories,
+        selected_category_id=selected_category_id,
+    )
 
 
 @app.route("/contents/<int:content_id>/delete", methods=["POST"])
 def delete_content(content_id: int) -> Any:
     session = SessionLocal()
     content = session.get(WatchContent, content_id)
+    category_id = content.category_id if content else None
     if content:
         session.delete(content)
         session.commit()
         flash("关注内容已删除", "success")
-    return redirect(url_for("list_contents"))
+    return redirect(url_for("list_contents", category_id=category_id))
+
+
+@app.route("/notifications", methods=["GET", "POST"])
+def manage_notifications() -> Any:
+    session = SessionLocal()
+    email_setting = (
+        session.query(NotificationSetting)
+        .filter(NotificationSetting.channel == "email")
+        .one_or_none()
+    )
+    dingtalk_setting = (
+        session.query(NotificationSetting)
+        .filter(NotificationSetting.channel == "dingtalk")
+        .one_or_none()
+    )
+
+    if request.method == "POST":
+        config_type = request.form.get("config_type")
+        if config_type == "email":
+            smtp_host = request.form.get("smtp_host", "").strip()
+            smtp_port_raw = request.form.get("smtp_port", "").strip()
+            smtp_username = request.form.get("smtp_username", "").strip()
+            smtp_password = request.form.get("smtp_password", "").strip()
+            smtp_sender = request.form.get("smtp_sender", "").strip()
+            smtp_use_tls = request.form.get("smtp_use_tls") == "on"
+
+            port_value: int | None = None
+            if smtp_port_raw:
+                try:
+                    port_value = int(smtp_port_raw)
+                except ValueError:
+                    flash("SMTP端口必须为数字", "danger")
+                    return render_template(
+                        "notifications/manage.html",
+                        email_setting=email_setting,
+                        dingtalk_setting=dingtalk_setting,
+                    )
+
+            if not (smtp_host and smtp_username and smtp_password):
+                flash("请完整填写SMTP主机、账号和密码", "danger")
+            else:
+                setting = email_setting or NotificationSetting(channel="email")
+                setting.smtp_host = smtp_host
+                setting.smtp_port = port_value if port_value is not None else 587
+                setting.smtp_username = smtp_username
+                setting.smtp_password = smtp_password
+                setting.smtp_sender = smtp_sender or smtp_username
+                setting.smtp_use_tls = smtp_use_tls
+                session.add(setting)
+                session.commit()
+                email_setting = setting
+                flash("SMTP配置已更新", "success")
+        elif config_type == "dingtalk":
+            webhook_url = request.form.get("webhook_url", "").strip()
+            if not webhook_url:
+                flash("请填写钉钉Webhook地址", "danger")
+            else:
+                setting = dingtalk_setting or NotificationSetting(channel="dingtalk")
+                setting.webhook_url = webhook_url
+                session.add(setting)
+                session.commit()
+                dingtalk_setting = setting
+                flash("钉钉配置已更新", "success")
+
+    return render_template(
+        "notifications/manage.html",
+        email_setting=email_setting,
+        dingtalk_setting=dingtalk_setting,
+    )
 
 
 @app.route("/tasks")
 def list_tasks() -> Any:
     session = SessionLocal()
-    tasks = session.query(MonitorTask).order_by(MonitorTask.created_at.desc()).all()
+    tasks = (
+        session.query(MonitorTask)
+        .options(
+            selectinload(MonitorTask.watch_contents).selectinload(WatchContent.category),
+            selectinload(MonitorTask.website),
+        )
+        .order_by(MonitorTask.created_at.desc())
+        .all()
+    )
     websites = session.query(Website).all()
-    contents = session.query(WatchContent).all()
-    return render_template("tasks/list.html", tasks=tasks, websites=websites, contents=contents)
+    return render_template("tasks/list.html", tasks=tasks, websites=websites)
 
 
 @app.route("/tasks/new", methods=["GET", "POST"])
 def create_task() -> Any:
     session = SessionLocal()
     websites = session.query(Website).all()
-    contents = session.query(WatchContent).all()
+    categories = (
+        session.query(ContentCategory)
+        .options(selectinload(ContentCategory.contents))
+        .order_by(ContentCategory.name)
+        .all()
+    )
+    has_contents = any(category.contents for category in categories)
     if request.method == "POST":
         name = request.form.get("name", "").strip()
         website_id = int(request.form.get("website_id", "0") or 0)
-        notification_email = request.form.get("notification_email", "").strip()
-        selected_content_ids = request.form.getlist("content_ids")
-        if not (name and website_id and notification_email and selected_content_ids):
-            flash("请完整填写任务信息", "danger")
+        notification_method = request.form.get("notification_method", "email").strip() or "email"
+        notification_email_raw = request.form.get("notification_email", "").strip()
+        selected_content_ids = [int(content_id) for content_id in request.form.getlist("content_ids")]
+
+        recipients = [email.strip() for email in notification_email_raw.replace(";", ",").split(",") if email.strip()]
+        form_data = {
+            "name": name,
+            "website_id": website_id,
+            "notification_method": notification_method,
+            "notification_email": notification_email_raw,
+        }
+
+        if not name or not website_id:
+            flash("请填写任务名称并选择网站", "danger")
+        elif not selected_content_ids:
+            flash("请至少选择一个关注内容", "danger")
+        elif notification_method == "email" and not recipients:
+            flash("请选择邮件通知时，请填写接收邮箱地址", "danger")
         else:
-            task = MonitorTask(name=name, website_id=website_id, notification_email=notification_email)
+            task = MonitorTask(
+                name=name,
+                website_id=website_id,
+                notification_method=notification_method,
+                notification_email=", ".join(recipients) if notification_method == "email" else "",
+            )
             for content_id in selected_content_ids:
                 content = session.get(WatchContent, int(content_id))
                 if content:
@@ -186,7 +434,12 @@ def create_task() -> Any:
             session.commit()
             flash("监控任务已创建", "success")
             return redirect(url_for("list_tasks"))
-    return render_template("tasks/form.html", websites=websites, contents=contents)
+    return render_template(
+        "tasks/form.html",
+        websites=websites,
+        categories=categories,
+        has_contents=has_contents,
+    )
 
 
 @app.route("/tasks/<int:task_id>/toggle", methods=["POST"])
@@ -258,6 +511,12 @@ def list_results() -> Any:
     if end_date:
         query = query.filter(CrawlResult.created_at <= datetime.fromisoformat(end_date))
 
+    query = query.options(
+        selectinload(CrawlResult.task),
+        selectinload(CrawlResult.website),
+        selectinload(CrawlResult.content).selectinload(WatchContent.category),
+    )
+
     page = int(request.args.get("page", "1") or 1)
     per_page = 10
     total = query.count()
@@ -272,14 +531,19 @@ def list_results() -> Any:
 
     tasks = session.query(MonitorTask).all()
     websites = session.query(Website).all()
-    contents = session.query(WatchContent).all()
+    categories = (
+        session.query(ContentCategory)
+        .options(selectinload(ContentCategory.contents))
+        .order_by(ContentCategory.name)
+        .all()
+    )
 
     return render_template(
         "results/list.html",
         results=results,
         tasks=tasks,
         websites=websites,
-        contents=contents,
+        categories=categories,
         page=page,
         total_pages=total_pages,
         query_args={
