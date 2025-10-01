@@ -140,6 +140,8 @@ def run_task(task_id: int) -> None:
         new_html = fetch_html(website.url)
         matched_results = []
 
+        subpage_errors: list[str] = []
+
         if website.fetch_subpages:
             new_links = compare_links(website.last_snapshot, new_html, website.url)
             LOGGER.debug("Found %d new links", len(new_links))
@@ -147,8 +149,9 @@ def run_task(task_id: int) -> None:
             for link in new_links:
                 try:
                     link_html = fetch_html(link)
-                except Exception:  # noqa: BLE001
+                except Exception as exc:  # noqa: BLE001
                     LOGGER.exception("Failed to fetch sub link %s", link)
+                    subpage_errors.append(f"{link}: {exc}")
                     continue
                 title, summary = summarize_html(link_html)
                 scores = score_contents(summary, task.watch_contents)
@@ -195,7 +198,10 @@ def run_task(task_id: int) -> None:
         session.add(task)
         log_entry.status = task.last_status
         log_entry.run_finished_at = datetime.utcnow()
-        log_entry.message = f"发现匹配结果 {len(matched_results)} 条"
+        message_parts = [f"发现匹配结果 {len(matched_results)} 条"]
+        if subpage_errors:
+            message_parts.append(f"子链接抓取失败 {len(subpage_errors)} 个: {'; '.join(subpage_errors)}")
+        log_entry.message = "；".join(message_parts)
         session.add(log_entry)
         session.commit()
 
