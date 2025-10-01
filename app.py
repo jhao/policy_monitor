@@ -398,12 +398,20 @@ def create_task() -> Any:
         .all()
     )
     has_contents = any(category.contents for category in categories)
+    form_data = {
+        "name": "",
+        "website_id": None,
+        "notification_method": "email",
+        "notification_email": "",
+    }
+    selected_content_ids: set[int] = set()
+
     if request.method == "POST":
         name = request.form.get("name", "").strip()
         website_id = int(request.form.get("website_id", "0") or 0)
         notification_method = request.form.get("notification_method", "email").strip() or "email"
         notification_email_raw = request.form.get("notification_email", "").strip()
-        selected_content_ids = [int(content_id) for content_id in request.form.getlist("content_ids")]
+        selected_content_ids = {int(content_id) for content_id in request.form.getlist("content_ids")}
 
         recipients = [email.strip() for email in notification_email_raw.replace(";", ",").split(",") if email.strip()]
         form_data = {
@@ -439,6 +447,8 @@ def create_task() -> Any:
         websites=websites,
         categories=categories,
         has_contents=has_contents,
+        form_data=form_data,
+        selected_content_ids=selected_content_ids,
     )
 
 

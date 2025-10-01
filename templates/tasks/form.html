@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 {% block content %}
 {% set is_edit = task is not none %}
+{% set selected_ids = selected_content_ids or [] %}
 <h2>{{ '编辑监控任务' if is_edit else '新增监控任务' }}</h2>
 <form method="post" class="mt-3">
   <div class="mb-3">
@@ -45,7 +46,7 @@
           {% for content in category.contents %}
           <div class="col-md-6 col-lg-4">
             <div class="form-check">
-              <input class="form-check-input" type="checkbox" value="{{ content.id }}" id="content{{ content.id }}" name="content_ids">
+              <input class="form-check-input" type="checkbox" value="{{ content.id }}" id="content{{ content.id }}" name="content_ids" {% if content.id in selected_ids %}checked{% endif %}>
               <label class="form-check-label" for="content{{ content.id }}">{{ content.text }}</label>
             </div>
           </div>
