@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+import threading
+from datetime import datetime, timedelta
 from typing import Any
 
-from flask import Flask, flash, redirect, render_template, request, url_for
+from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
 from sqlalchemy.orm import joinedload, selectinload
 
-from crawler import SIMILARITY_THRESHOLD
+from crawler import SIMILARITY_THRESHOLD, run_task
 from database import SessionLocal, init_db
 from models import (
     ContentCategory,
@@ -564,7 +565,88 @@ def view_task(task_id: int) -> Any:
         .limit(20)
         .all()
     )
-    return render_template("tasks/detail.html", task=task, logs=logs, results=results, threshold=SIMILARITY_THRESHOLD)
+    active_log = next((log for log in logs if log.status == "running"), None)
+    next_run_at: datetime | None = None
+    if not active_log:
+        if task.website and task.website.interval_minutes:
+            interval = timedelta(minutes=task.website.interval_minutes)
+        else:
+            interval = timedelta(minutes=60)
+        if task.is_active and task.website:
+            if task.last_run_at:
+                next_run_at = task.last_run_at + interval
+            else:
+                next_run_at = datetime.utcnow() + interval
+    return render_template(
+        "tasks/detail.html",
+        task=task,
+        logs=logs,
+        results=results,
+        threshold=SIMILARITY_THRESHOLD,
+        active_log=active_log,
+        next_run_at=next_run_at,
+    )
+
+
+@app.route("/tasks/<int:task_id>/run-now", methods=["POST"])
+def run_task_now(task_id: int) -> Any:
+    session = SessionLocal()
+    try:
+        task = session.get(MonitorTask, task_id)
+        if not task:
+            flash("未找到任务", "danger")
+            return redirect(url_for("list_tasks"))
+
+        running_log = (
+            session.query(CrawlLog)
+            .filter(CrawlLog.task_id == task_id, CrawlLog.status == "running")
+            .first()
+        )
+        if running_log:
+            flash("任务正在执行中，请稍后再试", "warning")
+            return redirect(url_for("view_task", task_id=task_id))
+
+        threading.Thread(target=run_task, args=(task_id,), daemon=True).start()
+        flash("已开始立即执行任务", "success")
+        return redirect(url_for("view_task", task_id=task_id))
+    finally:
+        session.close()
+
+
+@app.route("/tasks/<int:task_id>/logs/<int:log_id>/entries")
+def stream_task_log_entries(task_id: int, log_id: int) -> Any:
+    session = SessionLocal()
+    log = (
+        session.query(CrawlLog)
+        .options(selectinload(CrawlLog.entries))
+        .filter(CrawlLog.task_id == task_id, CrawlLog.id == log_id)
+        .first()
+    )
+    if not log:
+        session.close()
+        return jsonify({"error": "日志不存在"}), 404
+
+    after_id = request.args.get("after", type=int)
+    entries = [
+        {
+            "id": entry.id,
+            "created_at": entry.created_at.isoformat() if entry.created_at else None,
+            "level": entry.level,
+            "message": entry.message,
+        }
+        for entry in log.entries
+        if after_id is None or entry.id > after_id
+    ]
+    response = {
+        "log_id": log.id,
+        "status": log.status,
+        "run_started_at": log.run_started_at.isoformat() if log.run_started_at else None,
+        "run_finished_at": log.run_finished_at.isoformat() if log.run_finished_at else None,
+        "message": log.message,
+        "entries": entries,
+    }
+    session.close()
+    return jsonify(response)
 
 
 @app.route("/tasks/<int:task_id>/delete", methods=["POST"])

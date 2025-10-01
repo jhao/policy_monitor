@@ -1,67 +1,106 @@
 {% extends 'base.html' %}
 {% block content %}
-<h2>任务详情 - {{ task.name }}</h2>
-<p><strong>网站：</strong> {{ task.website.name if task.website else '未配置' }} / {{ task.website.url if task.website else '' }}</p>
-<p><strong>关注内容：</strong>
-  {% for content in task.watch_contents %}
-    <span class="badge text-bg-secondary">{{ content.text }}</span>
-  {% endfor %}
-</p>
-<p><strong>通知方式：</strong>
-  {% if task.notification_method == 'dingtalk' %}
-    钉钉群机器人
-  {% else %}
-    邮件
-  {% endif %}
-</p>
-{% if task.notification_method == 'email' %}
-<p><strong>通知邮箱：</strong> {{ task.notification_email or '未配置' }}</p>
-{% endif %}
-<p><strong>任务状态：</strong> {{ '运行中' if task.is_active else '已暂停' }}，最近状态：{{ task.last_status or '无' }}</p>
-<p><strong>相似度阈值：</strong> {{ threshold }}</p>
+{% set status_styles = {
+  'running': ('warning', '执行中'),
+  'success': ('success', '成功'),
+  'completed': ('primary', '已完成'),
+  'failed': ('danger', '失败')
+} %}
 
-<h3 class="mt-4">最近执行日志</h3>
-<table class="table table-sm table-bordered">
-  <thead>
-    <tr>
-      <th>开始时间</th>
-      <th>结束时间</th>
-      <th>状态</th>
-      <th>信息</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for log in logs %}
-    <tr>
-      <td>{{ log.run_started_at }}</td>
-      <td>{{ log.run_finished_at }}</td>
-      <td>{{ log.status }}</td>
-      <td>{{ log.message }}</td>
-    </tr>
-    {% if log.entries %}
-    <tr>
-      <td colspan="4">
-        <ul class="list-unstyled mb-0">
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+  <h2 class="mb-0">任务详情 - {{ task.name }}</h2>
+  <div class="d-flex flex-wrap gap-2">
+    <form method="post" action="{{ url_for('run_task_now', task_id=task.id) }}">
+      <button type="submit" class="btn btn-primary" {% if active_log %}disabled{% endif %}>立即执行任务</button>
+    </form>
+    <a class="btn btn-secondary" href="{{ url_for('list_tasks') }}">返回任务列表</a>
+  </div>
+</div>
+
+<div class="card mb-4">
+  <div class="card-body">
+    <div class="row gy-3">
+      <div class="col-lg-6">
+        <h5 class="card-title">基本信息</h5>
+        <p class="mb-1"><strong>网站：</strong> {{ task.website.name if task.website else '未配置' }}</p>
+        <p class="mb-1"><strong>URL：</strong>
+          {% if task.website %}
+            <a href="{{ task.website.url }}" target="_blank">{{ task.website.url }}</a>
+          {% else %}
+            未配置
+          {% endif %}
+        </p>
+        <p class="mb-1"><strong>关注内容：</strong>
+          {% if task.watch_contents %}
+            {% for content in task.watch_contents %}
+              <span class="badge text-bg-secondary me-1 mb-1">{{ content.text }}</span>
+            {% endfor %}
+          {% else %}
+            无
+          {% endif %}
+        </p>
+        <p class="mb-0"><strong>相似度阈值：</strong> {{ threshold }}</p>
+      </div>
+      <div class="col-lg-6">
+        <h5 class="card-title">执行与通知</h5>
+        <p class="mb-1"><strong>任务状态：</strong> {{ '运行中' if task.is_active else '已暂停' }}</p>
+        <p class="mb-1"><strong>最近执行状态：</strong> {{ status_styles.get(task.last_status, ('secondary', task.last_status or '无'))[1] }}</p>
+        <p class="mb-1"><strong>最近执行时间：</strong> {{ task.last_run_at or '无' }}</p>
+        {% if next_run_at %}
+        <p class="mb-1"><strong>下一次执行时间：</strong> {{ next_run_at.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+        {% elif task.is_active and not active_log %}
+        <p class="mb-1 text-muted"><strong>下一次执行时间：</strong> 调度将在配置的间隔内自动安排</p>
+        {% endif %}
+        {% if task.notification_method == 'dingtalk' %}
+        <p class="mb-1"><strong>通知方式：</strong> 钉钉群机器人</p>
+        {% else %}
+        <p class="mb-1"><strong>通知方式：</strong> 邮件</p>
+        <p class="mb-0"><strong>通知邮箱：</strong> {{ task.notification_email or '未配置' }}</p>
+        {% endif %}
+      </div>
+    </div>
+    {% if active_log %}
+    <div class="alert alert-warning mt-3 mb-0" role="alert">
+      任务正在执行中，日志将实时更新。
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<h3 class="h5">执行日志</h3>
+{% if logs %}
+  {% for log in logs %}
+    {% set status = status_styles.get(log.status, ('secondary', log.status or '未知')) %}
+    <div class="card mb-3" id="log-{{ log.id }}" data-log-id="{{ log.id }}" {% if active_log and log.id == active_log.id %}data-log-running="true" data-fetch-url="{{ url_for('stream_task_log_entries', task_id=task.id, log_id=log.id) }}"{% endif %}>
+      <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <div>
+          <span class="badge text-bg-{{ status[0] }}" data-log-status>{{ status[1] }}</span>
+          <span class="ms-2">开始：{{ log.run_started_at or '未知' }}</span>
+          <span class="ms-2">结束：<span data-log-finished>{{ log.run_finished_at or (log.status == 'running' and '进行中' or '未知') }}</span></span>
+        </div>
+        <div class="text-muted small">日志编号：{{ log.id }}</div>
+      </div>
+      <div class="card-body">
+        <p class="text-muted mb-3" data-log-message>{{ log.message or '暂无汇总信息' }}</p>
+        <ul class="list-unstyled mb-0 log-entry-list">
           {% for entry in log.entries %}
-          <li class="mb-1">
-            <span class="badge text-bg-secondary me-1">{{ entry.level|upper }}</span>
+          <li class="mb-2" data-entry-id="{{ entry.id }}">
+            <span class="badge text-bg-secondary me-2">{{ entry.level|upper }}</span>
             <small class="text-muted me-2">{{ entry.created_at }}</small>
             {{ entry.message }}
           </li>
+          {% else %}
+          <li class="text-muted" data-empty-log>暂无日志明细</li>
           {% endfor %}
         </ul>
-      </td>
-    </tr>
-    {% endif %}
-    {% else %}
-    <tr>
-      <td colspan="4" class="text-center text-muted">暂无日志</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+      </div>
+    </div>
+  {% endfor %}
+{% else %}
+  <div class="alert alert-secondary">暂无执行日志。</div>
+{% endif %}
 
-<h3 class="mt-4">最近匹配结果</h3>
+<h3 class="h5 mt-4">最近匹配结果</h3>
 <table class="table table-striped">
   <thead>
     <tr>
@@ -88,5 +127,95 @@
     {% endfor %}
   </tbody>
 </table>
+
 <a class="btn btn-secondary" href="{{ url_for('list_tasks') }}">返回任务列表</a>
+
+{% if active_log %}
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    const logCard = document.querySelector('[data-log-running="true"]');
+    if (!logCard) {
+      return;
+    }
+
+    const entryList = logCard.querySelector('.log-entry-list');
+    const statusBadge = logCard.querySelector('[data-log-status]');
+    const messageEl = logCard.querySelector('[data-log-message]');
+    const finishedEl = logCard.querySelector('[data-log-finished]');
+    const fetchUrl = logCard.getAttribute('data-fetch-url');
+    const statusMap = {
+      running: {cls: 'warning', text: '执行中'},
+      success: {cls: 'success', text: '成功'},
+      completed: {cls: 'primary', text: '已完成'},
+      failed: {cls: 'danger', text: '失败'}
+    };
+
+    let lastEntryId = 0;
+    entryList.querySelectorAll('[data-entry-id]').forEach(function (item) {
+      const id = parseInt(item.getAttribute('data-entry-id'), 10);
+      if (id > lastEntryId) {
+        lastEntryId = id;
+      }
+    });
+
+    function appendEntry(entry) {
+      if (entryList.querySelector('[data-entry-id="' + entry.id + '"]')) {
+        return;
+      }
+      const emptyPlaceholder = entryList.querySelector('[data-empty-log]');
+      if (emptyPlaceholder) {
+        emptyPlaceholder.remove();
+      }
+      const li = document.createElement('li');
+      li.className = 'mb-2';
+      li.setAttribute('data-entry-id', entry.id);
+      li.innerHTML = '<span class="badge text-bg-secondary me-2">' + entry.level.toUpperCase() + '</span>' +
+        '<small class="text-muted me-2">' + (entry.created_at || '') + '</small>' +
+        entry.message;
+      entryList.appendChild(li);
+    }
+
+    function updateStatus(status) {
+      const info = statusMap[status];
+      if (!info || !statusBadge) {
+        return;
+      }
+      statusBadge.className = 'badge text-bg-' + info.cls;
+      statusBadge.textContent = info.text;
+    }
+
+    function poll() {
+      const url = lastEntryId ? fetchUrl + '?after=' + lastEntryId : fetchUrl;
+      fetch(url)
+        .then(function (response) { return response.json(); })
+        .then(function (data) {
+          if (Array.isArray(data.entries)) {
+            data.entries.forEach(function (entry) {
+              appendEntry(entry);
+              if (entry.id > lastEntryId) {
+                lastEntryId = entry.id;
+              }
+            });
+          }
+          if (data.message && messageEl) {
+            messageEl.textContent = data.message;
+          }
+          if (data.status && data.status !== 'running') {
+            updateStatus(data.status);
+            if (finishedEl && data.run_finished_at) {
+              finishedEl.textContent = data.run_finished_at;
+            }
+            clearInterval(timer);
+          }
+        })
+        .catch(function (error) {
+          console.error('日志刷新失败', error);
+        });
+    }
+
+    const timer = setInterval(poll, 3000);
+    poll();
+  });
+</script>
+{% endif %}
 {% endblock %}

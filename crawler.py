@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Iterable, List, Tuple
+from typing import Iterable, List
 from urllib.parse import urljoin
 
 import requests
@@ -124,8 +124,15 @@ def notify(
 
 def run_task(task_id: int) -> None:
     session = SessionLocal()
-    log_details: list[Tuple[str, str]] = []
     log_entry_id: int | None = None
+
+    def add_detail(message: str, level: str = "info") -> None:
+        if log_entry_id is None:
+            return
+        detail = CrawlLogDetail(log_id=log_entry_id, message=message, level=level)
+        session.add(detail)
+        session.commit()
+
     try:
         task = session.get(MonitorTask, task_id)
         if not task:
@@ -136,9 +143,6 @@ def run_task(task_id: int) -> None:
         session.add(log_entry)
         session.commit()
         log_entry_id = log_entry.id
-
-        def add_detail(message: str, level: str = "info") -> None:
-            log_details.append((message, level))
 
         add_detail(f"开始执行任务《{task.name}》", "info")
 
@@ -167,6 +171,7 @@ def run_task(task_id: int) -> None:
                 except Exception:  # noqa: BLE001
                     LOGGER.exception("Failed to fetch sub link %s", link)
                     add_detail(f"子链接抓取失败：{link}", "warning")
+                    subpage_errors.append(link)
                     continue
                 title, summary = summarize_html(link_html)
                 scores = score_contents(summary, task.watch_contents)
@@ -230,10 +235,6 @@ def run_task(task_id: int) -> None:
         if log_entry is None:
             raise CrawlError("日志记录不存在")
 
-        for message, level in log_details:
-            detail = CrawlLogDetail(log_id=log_entry.id, message=message, level=level)
-            session.add(detail)
-
         log_entry.status = task.last_status
         log_entry.run_finished_at = datetime.utcnow()
         message_parts = [f"发现匹配结果 {len(matched_results)} 条"]
@@ -248,8 +249,15 @@ def run_task(task_id: int) -> None:
     except Exception as exc:  # noqa: BLE001
         session.rollback()
         LOGGER.exception("Task %s failed", task_id)
-        log_details.append(("任务执行失败，已回滚未完成操作", "error"))
-        log_details.append((f"错误信息：{exc}", "error"))
+
+        if log_entry_id is None:
+            log_entry = CrawlLog(task_id=task_id)
+            session.add(log_entry)
+            session.commit()
+            log_entry_id = log_entry.id
+
+        add_detail("任务执行失败，已回滚未完成操作", "error")
+        add_detail(f"错误信息：{exc}", "error")
 
         task = session.get(MonitorTask, task_id)
         if task:
@@ -257,22 +265,12 @@ def run_task(task_id: int) -> None:
             task.last_run_at = datetime.utcnow()
             session.add(task)
 
-        if log_entry_id is None:
-            log_entry = CrawlLog(task_id=task_id)
-            session.add(log_entry)
-            session.flush()
-            log_entry_id = log_entry.id
-
         log_entry = session.get(CrawlLog, log_entry_id)
         if log_entry is None:
             log_entry = CrawlLog(task_id=task_id)
             session.add(log_entry)
-            session.flush()
+            session.commit()
             log_entry_id = log_entry.id
-
-        for message, level in log_details:
-            detail = CrawlLogDetail(log_id=log_entry.id, message=message, level=level)
-            session.add(detail)
 
         log_entry.status = "failed"
         log_entry.run_finished_at = datetime.utcnow()
