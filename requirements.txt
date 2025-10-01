@@ -1,7 +1,9 @@
-Flask==2.3.3
-SQLAlchemy==2.0.23
-requests==2.31.0
-beautifulsoup4==4.12.2
-sentence-transformers==2.2.2
-numpy==1.26.2
-scipy==1.11.3
+Flask>=3.1.0
+SQLAlchemy>=2.0.23
+requests>=2.31.0
+beautifulsoup4>=4.12.2
+
+# 以下依赖仅在使用语义相似度模型时需要，Python 3.13 环境可选择跳过
+sentence-transformers>=2.2.2; python_version < "3.13"
+numpy>=1.26.2; python_version < "3.13"
+scipy>=1.11.3; python_version < "3.13"
