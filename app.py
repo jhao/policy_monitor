@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import threading
 from datetime import datetime, timedelta
 from typing import Any
@@ -20,14 +19,22 @@ from models import (
     Website,
 )
 from scheduler import MonitorScheduler
+from logging_utils import configure_logging
+from time_utils import format_local_datetime, get_local_timezone, to_local
 
-logging.basicConfig(level=logging.INFO)
+configure_logging()
+
 
 app = Flask(__name__)
 app.config.update(SECRET_KEY="monitor-secret-key")
 
 scheduler = MonitorScheduler()
 _setup_complete = False
+
+
+@app.template_filter("format_datetime")
+def format_datetime_filter(value: datetime | None) -> str:
+    return format_local_datetime(value)
 
 
 def ensure_setup() -> None:
@@ -375,17 +382,83 @@ def manage_notifications() -> Any:
 @app.route("/tasks")
 def list_tasks() -> Any:
     session = SessionLocal()
-    tasks = (
-        session.query(MonitorTask)
-        .options(
-            selectinload(MonitorTask.watch_contents).selectinload(WatchContent.category),
-            selectinload(MonitorTask.website),
+    try:
+        tasks = (
+            session.query(MonitorTask)
+            .options(
+                selectinload(MonitorTask.watch_contents).selectinload(WatchContent.category),
+                selectinload(MonitorTask.website),
+                selectinload(MonitorTask.logs),
+            )
+            .order_by(MonitorTask.created_at.desc())
+            .all()
         )
-        .order_by(MonitorTask.created_at.desc())
-        .all()
-    )
-    websites = session.query(Website).all()
-    return render_template("tasks/list.html", tasks=tasks, websites=websites)
+        websites = session.query(Website).all()
+        local_timezone = get_local_timezone()
+        task_rows: list[dict[str, Any]] = []
+
+        for task in tasks:
+            website = task.website
+            interval = None
+            if website and website.interval_minutes:
+                interval = timedelta(minutes=website.interval_minutes)
+
+            now_local = datetime.now(local_timezone)
+            latest_log = task.logs[0] if task.logs else None
+            is_running = bool(
+                latest_log and latest_log.status == "running" and latest_log.run_finished_at is None
+            )
+
+            last_finished_log = next((log for log in task.logs if log.run_finished_at), None)
+            last_run_time = task.last_run_at
+            if last_finished_log and last_finished_log.run_finished_at:
+                last_run_time = last_finished_log.run_finished_at
+
+            next_run_at = None
+            if task.is_active and interval:
+                reference_time = last_run_time or task.created_at
+                if reference_time:
+                    reference_time_local = to_local(reference_time)
+                else:
+                    reference_time_local = None
+                if reference_time_local is None:
+                    reference_time_local = now_local
+                next_run_at = reference_time_local + interval
+
+            if next_run_at and next_run_at < now_local:
+                next_run_at = now_local
+
+            if last_finished_log:
+                last_result_status = last_finished_log.status
+            elif task.last_status:
+                last_result_status = task.last_status
+            else:
+                last_result_status = None
+
+            if last_result_status in {"success", "completed"}:
+                last_result_label = "成功"
+            elif last_result_status == "failed":
+                last_result_label = "失败"
+            else:
+                last_result_label = "未执行"
+
+            task_rows.append(
+                {
+                    "task": task,
+                    "next_run_at": next_run_at,
+                    "is_running": is_running,
+                    "last_run_at": last_run_time,
+                    "last_result_label": last_result_label,
+                }
+            )
+
+        return render_template(
+            "tasks/list.html",
+            task_rows=task_rows,
+            websites=websites,
+        )
+    finally:
+        session.close()
 
 
 @app.route("/tasks/new", methods=["GET", "POST"])
