@@ -25,6 +25,10 @@ class CrawlError(RuntimeError):
 def fetch_html(url: str) -> str:
     response = requests.get(url, timeout=20)
     response.raise_for_status()
+    if not response.encoding or response.encoding.lower() == "iso-8859-1":
+        apparent = response.apparent_encoding
+        if apparent:
+            response.encoding = apparent
     return response.text
 
 
