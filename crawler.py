@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+from collections import Counter
 from datetime import datetime
-from typing import Iterable, List
+from typing import Iterable, List, Sequence
 from urllib.parse import urljoin
 
 import requests
@@ -23,41 +25,78 @@ def _is_non_empty_text(value: str | None) -> bool:
     return bool(value and value.strip())
 
 
-def parse_snapshot(snapshot: str | None) -> tuple[str | None, list[dict[str, str]], str | None]:
+def _normalize_whitespace(text: str) -> str:
+    return " ".join(text.split())
+
+
+def extract_body_text(html: str | None) -> str:
+    """Return a flattened body text similar to ``$("body")[0].innerText``."""
+
+    if not isinstance(html, str):
+        return ""
+
+    soup = BeautifulSoup(html, "html.parser")
+    body = soup.body or soup
+    for tag in body.find_all(["script", "style", "noscript"]):
+        tag.decompose()
+    text = body.get_text(" ", strip=True)
+    return _normalize_whitespace(text)
+
+
+def parse_snapshot(
+    snapshot: str | None,
+) -> tuple[str | None, list[dict[str, str | None]], str | None, str | None]:
     """Parse a stored snapshot payload.
 
     Returns a tuple containing the main page HTML, a list of subpage entries,
-    and the detected title of the main page. Each entry is a mapping with
-    ``url``, ``html`` and optional ``title`` keys. The helper is
-    backward-compatible with legacy snapshots that stored the main HTML as a
-    plain string.
+    the detected title of the main page, and the flattened body text. Each
+    entry is a mapping with ``url``, ``html``, optional ``title`` and ``text``
+    keys. The helper is backward-compatible with legacy snapshots that stored
+    the main HTML as a plain string.
     """
 
     if not snapshot:
-        return None, [], None
+        return None, [], None, None
 
     try:
         data = json.loads(snapshot)
     except json.JSONDecodeError:
-        return snapshot, [], None
+        return snapshot, [], None, extract_body_text(snapshot)
 
-    def _add_entry(entries: list[dict[str, str | None]], url: str | None, html: str | None, title: str | None = None) -> None:
+    def _add_entry(
+        entries: list[dict[str, str | None]],
+        url: str | None,
+        html: str | None,
+        title: str | None = None,
+        text: str | None = None,
+    ) -> None:
         if not isinstance(url, str) or not isinstance(html, str):
             return
         normalized_title = title.strip() if isinstance(title, str) else ""
         if not normalized_title:
             normalized_title = summarize_html(html)[0]
-        entries.append({"url": url, "html": html, "title": normalized_title or None})
+        normalized_text = text.strip() if isinstance(text, str) else ""
+        if not normalized_text:
+            normalized_text = extract_body_text(html)
+        entries.append(
+            {
+                "url": url,
+                "html": html,
+                "title": normalized_title or None,
+                "text": normalized_text or None,
+            }
+        )
 
     if isinstance(data, dict) and ("main_html" in data or "subpages" in data):
         main_html = data.get("main_html") if isinstance(data.get("main_html"), str) else None
         main_title = data.get("main_title") if isinstance(data.get("main_title"), str) else None
+        main_text = data.get("main_text") if isinstance(data.get("main_text"), str) else None
         subpages_data = data.get("subpages", [])
         entries: list[dict[str, str | None]] = []
         if isinstance(subpages_data, dict):
             for url, html in subpages_data.items():
                 if isinstance(html, dict):
-                    _add_entry(entries, url, html.get("html"), html.get("title"))
+                    _add_entry(entries, url, html.get("html"), html.get("title"), html.get("text"))
                 else:
                     _add_entry(entries, url, html)
         elif isinstance(subpages_data, list):
@@ -66,15 +105,22 @@ def parse_snapshot(snapshot: str | None) -> tuple[str | None, list[dict[str, str
                     url = item.get("url")
                     html = item.get("html")
                     title = item.get("title")
-                    _add_entry(entries, url, html, title)
+                    text = item.get("text")
+                    _add_entry(entries, url, html, title, text)
         if not _is_non_empty_text(main_title) and isinstance(main_html, str):
             main_title = summarize_html(main_html)[0]
-        return main_html, entries, main_title
+        if not _is_non_empty_text(main_text) and isinstance(main_html, str):
+            main_text = extract_body_text(main_html)
+        return main_html, entries, main_title, main_text
 
     if isinstance(data, str):
-        return data, [], summarize_html(data)[0]
+        title, _ = summarize_html(data)
+        text = extract_body_text(data)
+        return data, [], title, text
 
-    return snapshot, [], summarize_html(snapshot)[0]
+    title, _ = summarize_html(snapshot)
+    text = extract_body_text(snapshot)
+    return snapshot, [], title, text
 
 
 def build_snapshot(
@@ -87,16 +133,23 @@ def build_snapshot(
         url = item.get("url") if isinstance(item, dict) else None
         html = item.get("html") if isinstance(item, dict) else None
         title = item.get("title") if isinstance(item, dict) else None
+        text = item.get("text") if isinstance(item, dict) else None
         if isinstance(url, str) and isinstance(html, str):
             serialized: dict[str, str | None] = {"url": url, "html": html}
             if _is_non_empty_text(title):
                 serialized["title"] = title.strip()
+            normalized_text = text.strip() if isinstance(text, str) else ""
+            if not normalized_text:
+                normalized_text = extract_body_text(html)
+            if normalized_text:
+                serialized["text"] = normalized_text
             serialized_subpages.append(serialized)
 
     payload = {
-        "version": 2,
+        "version": 3,
         "main_html": main_html,
         "main_title": main_title.strip() if _is_non_empty_text(main_title) else None,
+        "main_text": extract_body_text(main_html),
         "subpages": serialized_subpages,
     }
     return json.dumps(payload, ensure_ascii=False)
@@ -183,23 +236,63 @@ def _extract_display_title(soup: BeautifulSoup) -> str:
     return ""
 
 
+def _tokenize_for_summary(text: str) -> list[str]:
+    if not text:
+        return []
+    tokens = re.findall(r"[\u4e00-\u9fff]|[a-zA-Z0-9]+", text.lower())
+    return tokens
+
+
+def _split_sentences(text: str) -> list[str]:
+    if not text:
+        return []
+    separators = r"(?<=[。！？!?])\s+|[\n\r]+"
+    sentences = [segment.strip() for segment in re.split(separators, text) if segment.strip()]
+    if sentences:
+        return sentences
+    return [text.strip()]
+
+
+def _select_representative_sentence(sentences: Sequence[str], tokens: Counter[str]) -> str:
+    best_sentence = ""
+    best_score = float("-inf")
+    for sentence in sentences:
+        sentence_tokens = _tokenize_for_summary(sentence)
+        if not sentence_tokens:
+            continue
+        score = sum(tokens[token] for token in sentence_tokens) / len(sentence_tokens)
+        length_bonus = min(len(sentence) / 120.0, 1.0)
+        score += length_bonus
+        if score > best_score:
+            best_score = score
+            best_sentence = sentence
+    return best_sentence or (sentences[0] if sentences else "")
+
+
+def _generate_main_idea(text: str, fallback_title: str) -> str:
+    normalized_text = text.strip()
+    if not normalized_text:
+        return fallback_title
+
+    sentences = _split_sentences(normalized_text)
+    tokens = Counter(_tokenize_for_summary(normalized_text))
+    if not tokens:
+        return sentences[0] if sentences else fallback_title
+
+    representative = _select_representative_sentence(sentences, tokens)
+    representative = representative.strip()
+    if representative:
+        return representative[:120]
+    return fallback_title
+
+
 def summarize_html(html: str) -> tuple[str, str]:
     soup = BeautifulSoup(html, "html.parser")
-    title = _extract_display_title(soup)
-
-    main_container = soup.find("main") or soup.find("article") or soup
-    paragraphs = [
-        p.get_text(" ", strip=True)
-        for p in main_container.find_all("p")
-        if _is_non_empty_text(p.get_text(strip=True))
-    ]
-    if not paragraphs:
-        text_content = main_container.get_text(" ", strip=True)
-    else:
-        text_content = " ".join(paragraphs)
-
+    fallback_title = _extract_display_title(soup)
+    text_content = extract_body_text(html)
+    main_idea = _generate_main_idea(text_content, fallback_title)
     summary = text_content[:1000]
-    return title, summary
+    return main_idea, summary
 
 
 def compare_links(old_html: str | None, new_html: str, base_url: str) -> List[str]:
@@ -309,11 +402,12 @@ def run_task(task_id: int) -> None:
 
         add_detail(f"准备抓取网站：{website.url}")
         LOGGER.info("Running task %s on %s", task.name, website.url)
-        previous_main_html, _, _ = parse_snapshot(website.last_snapshot)
+        previous_main_html, _, _, previous_main_text = parse_snapshot(website.last_snapshot)
         new_html = fetch_html(website.url)
         add_detail("主页面抓取成功")
 
         main_title, main_summary = summarize_html(new_html)
+        current_main_text = extract_body_text(new_html)
         LOGGER.info("Task %s fetched main page title: %s", task.name, main_title or "<无标题>")
         if main_title:
             add_detail(f"主页面标题：{main_title}")
@@ -335,7 +429,13 @@ def run_task(task_id: int) -> None:
                 try:
                     link_html = fetch_html(link)
                     add_detail(f"子链接抓取成功：{link}")
-                    subpage_snapshots.append({"url": link, "html": link_html})
+                    subpage_snapshots.append(
+                        {
+                            "url": link,
+                            "html": link_html,
+                            "text": extract_body_text(link_html),
+                        }
+                    )
                 except Exception:  # noqa: BLE001
                     LOGGER.exception("Failed to fetch sub link %s", link)
                     add_detail(f"子链接抓取失败：{link}", "warning")
@@ -371,7 +471,10 @@ def run_task(task_id: int) -> None:
                     session.add(result)
                     matched_results.append((title, link, summary, matches))
         else:
-            has_changed = previous_main_html != new_html
+            previous_text_to_compare = previous_main_text
+            if not _is_non_empty_text(previous_text_to_compare) and isinstance(previous_main_html, str):
+                previous_text_to_compare = extract_body_text(previous_main_html)
+            has_changed = (previous_text_to_compare or "") != current_main_text
             add_detail("检测到页面发生变化" if has_changed else "页面内容无变化")
             if has_changed:
                 title, summary = main_title, main_summary
