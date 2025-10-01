@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any
 
 from flask import Flask, flash, redirect, render_template, request, url_for
+from sqlalchemy.orm import joinedload
 
 from crawler import SIMILARITY_THRESHOLD
 from database import SessionLocal, init_db
@@ -207,7 +208,13 @@ def view_task(task_id: int) -> Any:
     if not task:
         flash("未找到任务", "danger")
         return redirect(url_for("list_tasks"))
-    logs = session.query(CrawlLog).filter(CrawlLog.task_id == task_id).order_by(CrawlLog.run_started_at.desc()).all()
+    logs = (
+        session.query(CrawlLog)
+        .options(joinedload(CrawlLog.entries))
+        .filter(CrawlLog.task_id == task_id)
+        .order_by(CrawlLog.run_started_at.desc())
+        .all()
+    )
     results = (
         session.query(CrawlResult)
         .filter(CrawlResult.task_id == task_id)
