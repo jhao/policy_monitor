@@ -99,7 +99,26 @@
               <span class="badge text-bg-secondary">{{ log.status }}</span>
               {% endif %}
             </td>
-            <td>{{ log.message or '—' }}</td>
+            <td>
+              {% if log.message %}
+              <button
+                type="button"
+                class="btn btn-link p-0 align-baseline"
+                data-bs-toggle="modal"
+                data-bs-target="#logMessageModal"
+                data-message="{{ log.message|e }}"
+                data-channel-label="{{ '邮件' if log.channel == 'email' else '钉钉' }}"
+                data-status-label="{{ '成功' if log.status == 'success' else '失败' if log.status == 'failed' else log.status }}"
+                data-target="{{ (log.target or '')|e }}"
+                data-created-at="{{ log.created_at|format_datetime or '' }}"
+                title="点击查看详情"
+              >
+                {{ log.message|truncate(32, True, '…') }}
+              </button>
+              {% else %}
+              —
+              {% endif %}
+            </td>
           </tr>
           {% else %}
           <tr>
@@ -130,4 +149,50 @@
   </div>
   {% endif %}
 </div>
+
+<div class="modal fade" id="logMessageModal" tabindex="-1" aria-labelledby="logMessageModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="logMessageModalLabel">通知详情</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small" id="logMessageModalMeta"></p>
+        <pre id="logMessageModalBody" class="bg-light border rounded p-3 mb-0" style="white-space: pre-wrap;"></pre>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    var messageModal = document.getElementById('logMessageModal');
+    if (!messageModal) {
+      return;
+    }
+    messageModal.addEventListener('show.bs.modal', function (event) {
+      var trigger = event.relatedTarget;
+      var modalTitle = messageModal.querySelector('.modal-title');
+      var modalMeta = document.getElementById('logMessageModalMeta');
+      var modalBody = document.getElementById('logMessageModalBody');
+      var message = trigger ? trigger.getAttribute('data-message') || '' : '';
+      var channelLabel = trigger ? trigger.getAttribute('data-channel-label') || '' : '';
+      var statusLabel = trigger ? trigger.getAttribute('data-status-label') || '' : '';
+      var target = trigger ? trigger.getAttribute('data-target') || '' : '';
+      var createdAt = trigger ? trigger.getAttribute('data-created-at') || '' : '';
+      modalTitle.textContent = '通知详情';
+      var metaItems = [];
+      if (createdAt) metaItems.push('时间：' + createdAt);
+      if (channelLabel) metaItems.push('渠道：' + channelLabel);
+      if (statusLabel) metaItems.push('状态：' + statusLabel);
+      if (target) metaItems.push('目标：' + target);
+      modalMeta.textContent = metaItems.join(' · ');
+      modalBody.textContent = message || '无详细信息';
+    });
+  });
+</script>
 {% endblock %}

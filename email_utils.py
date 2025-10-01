@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import smtplib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import logging
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -10,6 +10,7 @@ from typing import Any, Iterable
 
 import requests
 from flask import current_app
+from ssl import create_default_context
 
 from database import SessionLocal
 from models import NotificationSetting
@@ -79,14 +80,21 @@ def _load_email_settings() -> EmailSettings:
 
     if setting and setting.smtp_host and setting.smtp_username and setting.smtp_password:
         sender = setting.smtp_sender or setting.smtp_username
+        encryption_enabled = setting.smtp_use_tls
+        if encryption_enabled is None:
+            encryption_enabled = True
+        port_value = setting.smtp_port or 587
+        if not encryption_enabled and port_value == 465:
+            # 部分历史数据未设置 TLS，但端口为 465 时需要使用 SSL
+            encryption_enabled = True
         use_tls, use_ssl = _resolve_transport_options(
-            setting.smtp_port or 587,
-            encryption_enabled=bool(setting.smtp_use_tls),
+            port_value,
+            encryption_enabled=bool(encryption_enabled),
             ssl_override=None,
         )
         return EmailSettings(
             host=setting.smtp_host,
-            port=setting.smtp_port or 587,
+            port=port_value,
             username=setting.smtp_username,
             password=setting.smtp_password,
             use_tls=use_tls,
@@ -173,17 +181,88 @@ def send_email(
         settings.use_ssl,
         settings.use_tls,
     )
-    smtp_client_cls = smtplib.SMTP_SSL if settings.use_ssl else smtplib.SMTP
-    with smtp_client_cls(settings.host, settings.port) as server:
-        server.ehlo()
-        if settings.use_tls:
-            server.starttls()
-            server.ehlo()
-        server.login(settings.username, settings.password)
-        server.sendmail(settings.sender, recipient_list, message.as_string())
+    _deliver_email(settings, recipient_list, message)
     LOGGER.info("Email sent successfully: %s", subject)
 
 
+def _deliver_email(
+    settings: EmailSettings,
+    recipient_list: list[str],
+    message: MIMEMultipart,
+) -> None:
+    smtp_client_cls = smtplib.SMTP_SSL if settings.use_ssl else smtplib.SMTP
+    smtp_kwargs: dict[str, Any] = {"timeout": 30}
+    if settings.use_ssl:
+        smtp_kwargs["context"] = create_default_context()
+
+    smtp_disconnected_exc = getattr(
+        smtplib,
+        "SMTPServerDisconnected",
+        getattr(smtplib, "SMTPException", Exception),
+    )
+
+    try:
+        try:
+            smtp_connection = smtp_client_cls(settings.host, settings.port, **smtp_kwargs)
+        except TypeError:
+            LOGGER.debug(
+                "SMTP client %s does not accept optional kwargs, retrying without",
+                smtp_client_cls,
+            )
+            smtp_connection = smtp_client_cls(settings.host, settings.port)
+
+        with smtp_connection as server:
+            server.ehlo()
+            if settings.use_tls:
+                try:
+                    server.starttls(context=create_default_context())
+                except TypeError:
+                    LOGGER.debug(
+                        "SMTP server.starttls does not accept context argument, retrying without",
+                    )
+                    server.starttls()
+                server.ehlo()
+            server.login(settings.username, settings.password)
+            server.sendmail(settings.sender, recipient_list, message.as_string())
+    except smtp_disconnected_exc as exc:
+        LOGGER.warning(
+            "SMTP connection closed unexpectedly when using ssl=%s starttls=%s: %s",
+            settings.use_ssl,
+            settings.use_tls,
+            exc,
+        )
+        if settings.use_ssl:
+            raise
+        fallback_settings = replace(settings, use_ssl=True, use_tls=False)
+        LOGGER.info(
+            "Retrying email delivery with implicit SSL on %s:%s",
+            fallback_settings.host,
+            fallback_settings.port,
+        )
+        fallback_kwargs: dict[str, Any] = {"timeout": 30, "context": create_default_context()}
+        try:
+            fallback_connection = smtplib.SMTP_SSL(
+                fallback_settings.host,
+                fallback_settings.port,
+                **fallback_kwargs,
+            )
+        except TypeError:
+            LOGGER.debug(
+                "SMTP_SSL does not accept optional kwargs, retrying without extra parameters",
+            )
+            fallback_connection = smtplib.SMTP_SSL(
+                fallback_settings.host,
+                fallback_settings.port,
+            )
+
+        with fallback_connection as server:
+            server.ehlo()
+            server.login(fallback_settings.username, fallback_settings.password)
+            server.sendmail(
+                fallback_settings.sender,
+                recipient_list,
+                message.as_string(),
+            )
 def send_dingtalk_message(payload: dict[str, Any]) -> str:
     webhook_url = _get_dingtalk_webhook()
     LOGGER.info("Sending DingTalk message to %s", webhook_url)
