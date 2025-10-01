@@ -38,6 +38,21 @@
       <td>{{ log.status }}</td>
       <td>{{ log.message }}</td>
     </tr>
+    {% if log.entries %}
+    <tr>
+      <td colspan="4">
+        <ul class="list-unstyled mb-0">
+          {% for entry in log.entries %}
+          <li class="mb-1">
+            <span class="badge text-bg-secondary me-1">{{ entry.level|upper }}</span>
+            <small class="text-muted me-2">{{ entry.created_at }}</small>
+            {{ entry.message }}
+          </li>
+          {% endfor %}
+        </ul>
+      </td>
+    </tr>
+    {% endif %}
     {% else %}
     <tr>
       <td colspan="4" class="text-center text-muted">暂无日志</td>

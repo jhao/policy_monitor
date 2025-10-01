@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Iterable, List
+from typing import Iterable, List, Tuple
 from urllib.parse import urljoin
 
 import requests
@@ -10,7 +10,8 @@ from bs4 import BeautifulSoup
 
 from database import SessionLocal
 from email_utils import NotificationConfigError, send_dingtalk_message, send_email
-from models import CrawlLog, CrawlResult, MonitorTask, WatchContent
+from models import CrawlLog, CrawlLogDetail, CrawlResult, MonitorTask, WatchContent
+
 from nlp import similarity
 
 SIMILARITY_THRESHOLD = 0.6
@@ -123,40 +124,56 @@ def notify(
 
 def run_task(task_id: int) -> None:
     session = SessionLocal()
+    log_details: list[Tuple[str, str]] = []
+    log_entry_id: int | None = None
     try:
         task = session.get(MonitorTask, task_id)
         if not task:
             LOGGER.error("Task %s not found", task_id)
             return
+
         log_entry = CrawlLog(task=task)
         session.add(log_entry)
         session.commit()
+        log_entry_id = log_entry.id
+
+        def add_detail(message: str, level: str = "info") -> None:
+            log_details.append((message, level))
+
+        add_detail(f"开始执行任务《{task.name}》", "info")
 
         website = task.website
         if not website:
             raise CrawlError("监控任务未配置网站")
 
+        add_detail(f"准备抓取网站：{website.url}")
         LOGGER.info("Running task %s on %s", task.name, website.url)
         new_html = fetch_html(website.url)
-        matched_results = []
+        add_detail("主页面抓取成功")
+        matched_results: list[tuple[str, str, str, list[tuple[WatchContent, float]]]] = []
 
         subpage_errors: list[str] = []
 
         if website.fetch_subpages:
             new_links = compare_links(website.last_snapshot, new_html, website.url)
             LOGGER.debug("Found %d new links", len(new_links))
+            add_detail(f"发现新链接 {len(new_links)} 个")
 
             for link in new_links:
+                add_detail(f"抓取子链接：{link}")
                 try:
                     link_html = fetch_html(link)
-                except Exception as exc:  # noqa: BLE001
+                    add_detail(f"子链接抓取成功：{link}")
+                except Exception:  # noqa: BLE001
                     LOGGER.exception("Failed to fetch sub link %s", link)
-                    subpage_errors.append(f"{link}: {exc}")
+                    add_detail(f"子链接抓取失败：{link}", "warning")
                     continue
                 title, summary = summarize_html(link_html)
                 scores = score_contents(summary, task.watch_contents)
                 matches = [(content, score) for content, score in scores if score >= SIMILARITY_THRESHOLD]
                 if matches:
+                    matched_contents = ", ".join(f"{content.text}({score:.2f})" for content, score in matches)
+                    add_detail(f"子链接命中关注项：{matched_contents}", "success")
                     best_match = max(matches, key=lambda item: item[1])
                     result = CrawlResult(
                         task=task,
@@ -171,11 +188,14 @@ def run_task(task_id: int) -> None:
                     matched_results.append((title, link, summary, matches))
         else:
             has_changed = website.last_snapshot != new_html
+            add_detail("检测到页面发生变化" if has_changed else "页面内容无变化")
             if has_changed:
                 title, summary = summarize_html(new_html)
                 scores = score_contents(summary, task.watch_contents)
                 matches = [(content, score) for content, score in scores if score >= SIMILARITY_THRESHOLD]
                 if matches:
+                    matched_contents = ", ".join(f"{content.text}({score:.2f})" for content, score in matches)
+                    add_detail(f"主页面命中关注项：{matched_contents}", "success")
                     best_match = max(matches, key=lambda item: item[1])
                     result = CrawlResult(
                         task=task,
@@ -189,6 +209,11 @@ def run_task(task_id: int) -> None:
                     session.add(result)
                     matched_results.append((title, website.url, summary, matches))
 
+        if matched_results:
+            add_detail(f"发现匹配结果 {len(matched_results)} 条", "success")
+        else:
+            add_detail("未发现符合条件的内容")
+
         website.last_snapshot = new_html
         website.last_fetched_at = datetime.utcnow()
         task.last_run_at = datetime.utcnow()
@@ -196,6 +221,19 @@ def run_task(task_id: int) -> None:
 
         session.add(website)
         session.add(task)
+
+        if log_entry_id is None:
+            session.flush()
+            log_entry_id = log_entry.id
+
+        log_entry = session.get(CrawlLog, log_entry_id)
+        if log_entry is None:
+            raise CrawlError("日志记录不存在")
+
+        for message, level in log_details:
+            detail = CrawlLogDetail(log_id=log_entry.id, message=message, level=level)
+            session.add(detail)
+
         log_entry.status = task.last_status
         log_entry.run_finished_at = datetime.utcnow()
         message_parts = [f"发现匹配结果 {len(matched_results)} 条"]
@@ -210,12 +248,35 @@ def run_task(task_id: int) -> None:
     except Exception as exc:  # noqa: BLE001
         session.rollback()
         LOGGER.exception("Task %s failed", task_id)
+        log_details.append(("任务执行失败，已回滚未完成操作", "error"))
+        log_details.append((f"错误信息：{exc}", "error"))
+
         task = session.get(MonitorTask, task_id)
         if task:
             task.last_status = "failed"
             task.last_run_at = datetime.utcnow()
             session.add(task)
-        log_entry = CrawlLog(task_id=task_id, status="failed", message=str(exc), run_finished_at=datetime.utcnow())
+
+        if log_entry_id is None:
+            log_entry = CrawlLog(task_id=task_id)
+            session.add(log_entry)
+            session.flush()
+            log_entry_id = log_entry.id
+
+        log_entry = session.get(CrawlLog, log_entry_id)
+        if log_entry is None:
+            log_entry = CrawlLog(task_id=task_id)
+            session.add(log_entry)
+            session.flush()
+            log_entry_id = log_entry.id
+
+        for message, level in log_details:
+            detail = CrawlLogDetail(log_id=log_entry.id, message=message, level=level)
+            session.add(detail)
+
+        log_entry.status = "failed"
+        log_entry.run_finished_at = datetime.utcnow()
+        log_entry.message = str(exc)
         session.add(log_entry)
         session.commit()
     finally:

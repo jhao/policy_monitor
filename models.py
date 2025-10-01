@@ -137,6 +137,12 @@ class CrawlLog(Base):
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     task: Mapped[MonitorTask] = relationship("MonitorTask", back_populates="logs")
+    entries: Mapped[List["CrawlLogDetail"]] = relationship(
+        "CrawlLogDetail",
+        back_populates="log",
+        cascade="all, delete-orphan",
+        order_by="CrawlLogDetail.created_at",
+    )
 
 
 class CrawlResult(Base):
@@ -156,4 +162,15 @@ class CrawlResult(Base):
     website: Mapped[Website] = relationship("Website")
     content: Mapped[WatchContent | None] = relationship("WatchContent")
 
+
+class CrawlLogDetail(Base):
+    __tablename__ = "crawl_log_details"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    log_id: Mapped[int] = mapped_column(ForeignKey("crawl_logs.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    level: Mapped[str] = mapped_column(String(20), default="info")
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+
+    log: Mapped[CrawlLog] = relationship("CrawlLog", back_populates="entries")
 
