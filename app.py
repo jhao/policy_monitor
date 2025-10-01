@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any
 
 from flask import Flask, flash, redirect, render_template, request, url_for
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 
 from crawler import SIMILARITY_THRESHOLD
 from database import SessionLocal, init_db
@@ -14,7 +14,7 @@ from models import (
     CrawlLog,
     CrawlResult,
     MonitorTask,
-    NotificationSetting，
+    NotificationSetting,
     WatchContent,
     Website,
 )
