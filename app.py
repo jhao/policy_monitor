@@ -492,7 +492,7 @@ def manage_notifications() -> Any:
                     webhook_url = send_dingtalk_message(
                         {
                             "msgtype": "feedCard",
-                            "title": "测试数据",
+                            "title": "\u00a0【订阅】测试数据",
                             "feedCard": {
                                 "links": [
                                     {
