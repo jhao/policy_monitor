@@ -14,6 +14,7 @@ from email_utils import (
     send_email,
 )
 from database import SessionLocal, init_db
+from sqlalchemy.orm import Session
 from models import (
     ContentCategory,
     CrawlLog,
@@ -52,6 +53,26 @@ def inject_timezone_context() -> dict[str, str]:
     if tz_name and tz_name not in tz_display:
         tz_display = f"{tz_name} ({tz_display})"
     return {"current_timezone_display": tz_display}
+
+
+def record_notification_log(
+    session: Session,
+    *,
+    channel: str,
+    status: str,
+    target: str | None = None,
+    message: str | None = None,
+    task: MonitorTask | None = None,
+) -> None:
+    log_entry = NotificationLog(
+        task=task,
+        channel=channel,
+        target=target,
+        status=status,
+        message=message,
+    )
+    session.add(log_entry)
+    session.commit()
 
 
 def ensure_setup() -> None:
@@ -420,6 +441,13 @@ def manage_notifications() -> Any:
                 target_recipient = recipient or fallback_recipient
                 if not target_recipient:
                     flash("请先保存 SMTP 配置或填写测试收件人", "danger")
+                    record_notification_log(
+                        session,
+                        channel="email",
+                        status="failed",
+                        target=None,
+                        message="测试邮件发送失败：未提供收件人",
+                    )
                 else:
                     try:
                         send_email(
@@ -430,17 +458,38 @@ def manage_notifications() -> Any:
                         )
                     except NotificationConfigError as exc:
                         flash(f"测试邮件发送失败：{exc}", "danger")
+                        record_notification_log(
+                            session,
+                            channel="email",
+                            status="failed",
+                            target=target_recipient,
+                            message=str(exc) or "测试邮件发送失败",
+                        )
                     except Exception as exc:  # noqa: BLE001
                         flash(f"测试邮件发送失败：{exc}", "danger")
+                        record_notification_log(
+                            session,
+                            channel="email",
+                            status="failed",
+                            target=target_recipient,
+                            message=str(exc) or "测试邮件发送失败",
+                        )
                     else:
                         flash(
                             f"测试邮件已发送至 {target_recipient}",
                             "success",
                         )
+                        record_notification_log(
+                            session,
+                            channel="email",
+                            status="success",
+                            target=target_recipient,
+                            message="测试邮件发送成功",
+                        )
                 return redirect(url_for("manage_notifications"))
             if config_type == "dingtalk" and action == "test":
                 try:
-                    send_dingtalk_message(
+                    webhook_url = send_dingtalk_message(
                         {
                             "msgtype": "text",
                             "text": {"content": "【测试】政策监控钉钉通知已触发"},
@@ -448,10 +497,31 @@ def manage_notifications() -> Any:
                     )
                 except NotificationConfigError as exc:
                     flash(f"测试钉钉通知失败：{exc}", "danger")
+                    record_notification_log(
+                        session,
+                        channel="dingtalk",
+                        status="failed",
+                        target=(dingtalk_setting.webhook_url if dingtalk_setting else None),
+                        message=str(exc) or "测试钉钉通知发送失败",
+                    )
                 except Exception as exc:  # noqa: BLE001
                     flash(f"测试钉钉通知失败：{exc}", "danger")
+                    record_notification_log(
+                        session,
+                        channel="dingtalk",
+                        status="failed",
+                        target=(dingtalk_setting.webhook_url if dingtalk_setting else None),
+                        message=str(exc) or "测试钉钉通知发送失败",
+                    )
                 else:
                     flash("测试钉钉通知已发送", "success")
+                    record_notification_log(
+                        session,
+                        channel="dingtalk",
+                        status="success",
+                        target=webhook_url,
+                        message="测试钉钉通知发送成功",
+                    )
                 return redirect(url_for("manage_notifications"))
             if config_type == "email":
                 smtp_host = request.form.get("smtp_host", "").strip()

@@ -568,7 +568,7 @@ def _build_notification_email_html(task: MonitorTask, items: list[dict[str, str]
 
 def _record_notification_log(
     session: Session,
-    task: MonitorTask,
+    task: MonitorTask | None,
     channel: str,
     target: str | None,
     status: str,
