@@ -30,6 +30,7 @@ class EmailSettings:
     password: str
     use_tls: bool
     sender: str
+    use_ssl: bool = False
 
 
 def _get_setting(name: str, default: str | None = None) -> str:
@@ -39,6 +40,30 @@ def _get_setting(name: str, default: str | None = None) -> str:
     if default is not None:
         return default
     raise NotificationConfigError(f"Missing configuration: {name}")
+
+
+def _get_optional_setting(name: str) -> str | None:
+    value = current_app.config.get(name) if current_app else os.getenv(name)
+    return value or None
+
+
+def _resolve_transport_options(
+    port: int, *, encryption_enabled: bool, ssl_override: bool | None
+) -> tuple[bool, bool]:
+    """Determine whether to use STARTTLS or implicit SSL for the SMTP connection."""
+
+    if not encryption_enabled:
+        return False, False
+
+    if ssl_override is not None:
+        if ssl_override:
+            return False, True
+        return True, False
+
+    if port == 465:
+        return False, True
+
+    return True, False
 
 
 def _load_email_settings() -> EmailSettings:
@@ -54,20 +79,37 @@ def _load_email_settings() -> EmailSettings:
 
     if setting and setting.smtp_host and setting.smtp_username and setting.smtp_password:
         sender = setting.smtp_sender or setting.smtp_username
+        use_tls, use_ssl = _resolve_transport_options(
+            setting.smtp_port or 587,
+            encryption_enabled=bool(setting.smtp_use_tls),
+            ssl_override=None,
+        )
         return EmailSettings(
             host=setting.smtp_host,
             port=setting.smtp_port or 587,
             username=setting.smtp_username,
             password=setting.smtp_password,
-            use_tls=bool(setting.smtp_use_tls),
+            use_tls=use_tls,
             sender=sender,
+            use_ssl=use_ssl,
         )
 
     host = _get_setting("SMTP_HOST")
     port = int(_get_setting("SMTP_PORT", "587"))
     username = _get_setting("SMTP_USERNAME")
     password = _get_setting("SMTP_PASSWORD")
-    use_tls = _get_setting("SMTP_USE_TLS", "true").lower() != "false"
+    use_tls_flag = _get_setting("SMTP_USE_TLS", "true").lower() != "false"
+    use_ssl_override_raw = _get_optional_setting("SMTP_USE_SSL")
+    use_ssl_override: bool | None
+    if use_ssl_override_raw is None:
+        use_ssl_override = None
+    else:
+        use_ssl_override = use_ssl_override_raw.lower() not in {"false", "0", "no"}
+    use_tls, use_ssl = _resolve_transport_options(
+        port,
+        encryption_enabled=use_tls_flag,
+        ssl_override=use_ssl_override,
+    )
     sender = _get_setting("SMTP_SENDER", username)
     return EmailSettings(
         host=host,
@@ -76,6 +118,7 @@ def _load_email_settings() -> EmailSettings:
         password=password,
         use_tls=use_tls,
         sender=sender,
+        use_ssl=use_ssl,
     )
 
 
@@ -122,15 +165,20 @@ def send_email(
     message.attach(MIMEText(html_body, "html", "utf-8"))
 
     LOGGER.info(
-        "Sending email via %s:%s as %s to %s",
+        "Sending email via %s:%s as %s to %s (ssl=%s, starttls=%s)",
         settings.host,
         settings.port,
         settings.sender,
         ", ".join(recipient_list),
+        settings.use_ssl,
+        settings.use_tls,
     )
-    with smtplib.SMTP(settings.host, settings.port) as server:
+    smtp_client_cls = smtplib.SMTP_SSL if settings.use_ssl else smtplib.SMTP
+    with smtp_client_cls(settings.host, settings.port) as server:
+        server.ehlo()
         if settings.use_tls:
             server.starttls()
+            server.ehlo()
         server.login(settings.username, settings.password)
         server.sendmail(settings.sender, recipient_list, message.as_string())
     LOGGER.info("Email sent successfully: %s", subject)
