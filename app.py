@@ -686,11 +686,27 @@ def view_task(task_id: int) -> Any:
     if not task:
         flash("未找到任务", "danger")
         return redirect(url_for("list_tasks"))
-    logs = (
+    page = request.args.get("page", default=1, type=int)
+    if page < 1:
+        page = 1
+
+    per_page = 5
+
+    log_query = (
         session.query(CrawlLog)
         .options(joinedload(CrawlLog.entries))
         .filter(CrawlLog.task_id == task_id)
         .order_by(CrawlLog.run_started_at.desc())
+    )
+
+    total_logs = log_query.count()
+    total_pages = (total_logs + per_page - 1) // per_page or 1
+    if page > total_pages:
+        page = total_pages
+
+    logs = (
+        log_query.offset((page - 1) * per_page)
+        .limit(per_page)
         .all()
     )
     results = (
@@ -720,6 +736,10 @@ def view_task(task_id: int) -> Any:
         threshold=SIMILARITY_THRESHOLD,
         active_log=active_log,
         next_run_at=next_run_at,
+        page=page,
+        total_pages=total_pages,
+        total_logs=total_logs,
+        per_page=per_page,
     )
 
 

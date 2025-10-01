@@ -5,7 +5,7 @@ import smtplib
 from dataclasses import dataclass
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Iterable
+from typing import Any, Iterable
 
 import requests
 from flask import current_app
@@ -120,12 +120,7 @@ def send_email(
         server.sendmail(settings.sender, recipients, message.as_string())
 
 
-def send_dingtalk_message(title: str, content: str, url: str | None = None) -> None:
+def send_dingtalk_message(payload: dict[str, Any]) -> None:
     webhook_url = _get_dingtalk_webhook()
-    payload = {
-        "title": title,
-        "content": content,
-        "url": url or "",
-    }
     response = requests.post(webhook_url, json=payload, timeout=10)
     response.raise_for_status()

@@ -5,7 +5,8 @@ import logging
 import re
 from collections import Counter
 from datetime import datetime
-from typing import Iterable, List, Sequence
+from html import escape as html_escape
+from typing import Any, Iterable, List, Sequence
 from urllib.parse import urljoin
 
 import requests
@@ -503,42 +504,76 @@ def score_contents(
     return results
 
 
-def notify(
-    task: MonitorTask,
-    title: str,
-    url: str,
-    summary: str,
-    matches: list[tuple[WatchContent, float]],
-) -> None:
-    rows = "".join(
-        f"<li><strong>{content.text}</strong> - 相似度: {score:.2f}</li>" for content, score in matches
-    )
-    html_body = f"""
-        <h3>监控任务: {task.name}</h3>
-        <p>发现新的内容匹配关注项：</p>
-        <ul>{rows}</ul>
-        <p><strong>标题:</strong> {title or '未提供'}</p>
-        <p><strong>链接:</strong> <a href='{url}'>{url}</a></p>
-        <p><strong>摘要:</strong> {summary}</p>
-    """
-    text_body = f"监控任务 {task.name} 发现匹配内容: {title or '未提供'} - {url}\n摘要: {summary}"
+def _extract_first_image_url(html: str | None, base_url: str | None) -> str | None:
+    if not html:
+        return None
+    soup = BeautifulSoup(html, "html.parser")
+    body = soup.body or soup
+    image = body.find("img")
+    if not image:
+        return None
+    src = image.get("src")
+    if not src:
+        return None
+    if base_url:
+        return urljoin(base_url, src)
+    return src
 
+
+def _build_notification_email_html(task: MonitorTask, items: list[dict[str, str]]) -> str:
+    blocks: list[str] = [
+        f"<h3 style=\"margin:0 0 16px 0;\">监控任务：{html_escape(task.name)}</h3>",
+        "<p style=\"margin:0 0 16px 0;\">发现以下符合关注内容的更新：</p>",
+    ]
+    for item in items:
+        image_html = (
+            f"<div style=\"flex:0 0 120px;margin-right:12px;\"><img src=\"{html_escape(item['pic'])}\" alt=\"预览图\" style=\"max-width:120px;border-radius:4px;\"/></div>"
+            if item["pic"]
+            else ""
+        )
+        summary = html_escape(item["summary"])
+        matches = html_escape(item["matches"])
+        blocks.append(
+            """
+<div style="display:flex;align-items:flex-start;border:1px solid #e0e0e0;border-radius:8px;padding:12px;margin-bottom:12px;background:#fafafa;">
+  {image}
+  <div style="flex:1;min-width:0;">
+    <h4 style="margin:0 0 8px 0;font-size:16px;">{title}</h4>
+    <p style="margin:0 0 8px 0;color:#555;">匹配关注项：{matches}</p>
+    <p style="margin:0 0 8px 0;white-space:pre-wrap;color:#333;">{summary}</p>
+    <p style="margin:0;">
+      <a href="{url}" style="color:#0d6efd;text-decoration:none;">查看详情</a>
+    </p>
+  </div>
+</div>
+            """.format(
+                image=image_html,
+                title=html_escape(item["title"]),
+                matches=matches or "无",
+                summary=summary,
+                url=html_escape(item["url"]),
+            )
+        )
+    return "".join(blocks)
+
+
+def _send_task_notifications(task: MonitorTask, payload_items: list[dict[str, str]]) -> None:
     if task.notification_method == "dingtalk":
-        content_lines = [f"监控任务：{task.name}"]
-        if matches:
-            content_lines.append("发现新的内容匹配关注项：")
-            for watch_content, score in matches:
-                content_lines.append(f"- {watch_content.text}（相似度 {score:.2f}）")
-        else:
-            content_lines.append("发现新的内容：")
-        content_lines.append(f"标题：{title or '未提供'}")
-        content_lines.append(f"摘要：{summary}")
-        content = "\n".join(content_lines)
+        links = [
+            {
+                "title": item["title"],
+                "messageURL": item["url"],
+                "picURL": item["pic"],
+            }
+            for item in payload_items
+        ]
         try:
             send_dingtalk_message(
-                title=f"监控任务 {task.name} 有新内容",
-                content=content,
-                url=url,
+                {
+                    "msgtype": "feedCard",
+                    "title": f"监控任务：{task.name}",
+                    "feedCard": {"links": links},
+                }
             )
         except NotificationConfigError:
             LOGGER.warning("钉钉通知配置缺失，任务 %s 无法发送", task.id)
@@ -546,17 +581,30 @@ def notify(
             LOGGER.exception("任务 %s 发送钉钉通知失败", task.id)
         return
 
-    recipients = [email.strip() for email in (task.notification_email or "").split(",") if email.strip()]
+    recipients = [
+        email.strip()
+        for email in (task.notification_email or "").split(",")
+        if email.strip()
+    ]
     if not recipients:
         LOGGER.warning("Task %s has no notification email", task.id)
         return
+
+    html_body = _build_notification_email_html(task, payload_items)
+    text_lines = [f"监控任务《{task.name}》发现 {len(payload_items)} 条匹配内容："]
+    for item in payload_items:
+        text_lines.append(f"- {item['title']} -> {item['url']}")
+        if item["matches"]:
+            text_lines.append(f"  匹配关注项：{item['matches']}")
+        if item["summary"]:
+            text_lines.append(f"  摘要：{item['summary']}")
 
     try:
         send_email(
             subject=f"监控任务 {task.name} 有新内容",
             recipients=recipients,
             html_body=html_body,
-            text_body=text_body,
+            text_body="\n".join(text_lines),
         )
     except NotificationConfigError:
         LOGGER.warning("邮件通知配置缺失，任务 %s 无法发送", task.id)
@@ -605,7 +653,7 @@ def run_task(task_id: int) -> None:
             add_detail(f"主页面标题：{main_title}")
         else:
             add_detail("主页面未发现标题", "warning")
-        matched_results: list[tuple[str, str, str, list[tuple[WatchContent, float]]]] = []
+        matched_results: list[dict[str, Any]] = []
 
         subpage_errors: list[str] = []
 
@@ -661,7 +709,16 @@ def run_task(task_id: int) -> None:
                         similarity_score=best_match[1],
                     )
                     session.add(result)
-                    matched_results.append((title, link, summary, matches))
+                    matched_results.append(
+                        {
+                            "title": title or link,
+                            "url": link,
+                            "summary": summary or "",
+                            "matches": matches,
+                            "html": link_html,
+                            "base_url": link,
+                        }
+                    )
         else:
             previous_text_to_compare = previous_main_text
             if not _is_non_empty_text(previous_text_to_compare) and isinstance(previous_main_html, str):
@@ -686,7 +743,16 @@ def run_task(task_id: int) -> None:
                         similarity_score=best_match[1],
                     )
                     session.add(result)
-                    matched_results.append((title, website.url, summary, matches))
+                    matched_results.append(
+                        {
+                            "title": title or website.url,
+                            "url": website.url,
+                            "summary": summary or "",
+                            "matches": matches,
+                            "html": new_html,
+                            "base_url": website.url,
+                        }
+                    )
 
         if matched_results:
             add_detail(f"发现匹配结果 {len(matched_results)} 条", "success")
@@ -718,8 +784,23 @@ def run_task(task_id: int) -> None:
         session.add(log_entry)
         session.commit()
 
-        for title, link, summary, matches in matched_results:
-            notify(task, title, link, summary, matches)
+        if matched_results:
+            payload_items: list[dict[str, str]] = []
+            for item in matched_results:
+                matches_label = "、".join(
+                    f"{content.text}({score:.2f})" for content, score in item["matches"]
+                )
+                image_url = _extract_first_image_url(item.get("html"), item.get("base_url")) or ""
+                payload_items.append(
+                    {
+                        "title": item["title"] or item["url"],
+                        "url": item["url"],
+                        "summary": (item["summary"] or "")[:200],
+                        "matches": matches_label,
+                        "pic": image_url,
+                    }
+                )
+            _send_task_notifications(task, payload_items)
     except Exception as exc:  # noqa: BLE001
         session.rollback()
         LOGGER.exception("Task %s failed", task_id)
