@@ -18,6 +18,16 @@
     <input class="form-check-input" type="checkbox" name="fetch_subpages" id="fetchSubpages" {% if website and website.fetch_subpages %}checked{% endif %}>
     <label class="form-check-label" for="fetchSubpages">需要抓取子页面</label>
   </div>
+  <div class="mb-3">
+    <label class="form-label">标题元素描述</label>
+    <textarea class="form-control" name="title_selectors" rows="3" placeholder="例如：id=main-title 或 css=h1.article-title">{{ website.title_selector_config if website and website.title_selector_config else '' }}</textarea>
+    <div class="form-text">每行一条规则，支持 <code>id=</code>、<code>class=</code>、<code>name=</code>、<code>css=</code>、<code>xpath=</code> 等写法，按顺序优先匹配。</div>
+  </div>
+  <div class="mb-4">
+    <label class="form-label">正文元素描述</label>
+    <textarea class="form-control" name="content_selectors" rows="4" placeholder="例如：css=article .content 或 xpath=//div[@id='detail']">{{ website.content_selector_config if website and website.content_selector_config else '' }}</textarea>
+    <div class="form-text">若能匹配到对应元素，将直接使用其文本作为页面标题或正文；未匹配到时将自动回退到智能摘要，并忽略菜单及页脚文字。</div>
+  </div>
   <button class="btn btn-primary" type="submit">保存</button>
   <a class="btn btn-secondary" href="{{ url_for('list_websites') }}">返回</a>
 </form>
