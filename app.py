@@ -69,6 +69,34 @@ def list_websites() -> Any:
     return render_template("websites/list.html", websites=websites)
 
 
+@app.route("/websites/<int:website_id>/snapshot")
+def view_website_snapshot(website_id: int) -> Any:
+    session = SessionLocal()
+    try:
+        website = session.get(Website, website_id)
+        if not website:
+            flash("未找到网站", "danger")
+            return redirect(url_for("list_websites"))
+
+        snapshot_lines: list[str] = []
+        if website.last_snapshot:
+            snapshot_lines = website.last_snapshot.splitlines()
+
+        related_tasks = [
+            {"id": task.id, "name": task.name}
+            for task in website.tasks
+        ]
+
+        return render_template(
+            "websites/snapshot.html",
+            website=website,
+            snapshot_lines=snapshot_lines,
+            related_tasks=related_tasks,
+        )
+    finally:
+        session.close()
+
+
 @app.route("/websites/new", methods=["GET", "POST"])
 def create_website() -> Any:
     session = SessionLocal()
@@ -736,36 +764,49 @@ def delete_task(task_id: int) -> Any:
 @app.route("/results")
 def list_results() -> Any:
     session = SessionLocal()
-    query = session.query(CrawlResult)
+    query = session.query(CrawlLog).join(CrawlLog.task)
 
-    task_id = request.args.get("task_id")
-    website_id = request.args.get("website_id")
-    content_id = request.args.get("content_id")
-    start_date = request.args.get("start_date")
-    end_date = request.args.get("end_date")
+    task_id = request.args.get("task_id", type=int)
+    website_id = request.args.get("website_id", type=int)
+    status = request.args.get("status", type=str)
+    start_date_raw = request.args.get("start_date", "") or ""
+    end_date_raw = request.args.get("end_date", "") or ""
 
     if task_id:
-        query = query.filter(CrawlResult.task_id == int(task_id))
+        query = query.filter(CrawlLog.task_id == task_id)
     if website_id:
-        query = query.filter(CrawlResult.website_id == int(website_id))
-    if content_id:
-        query = query.filter(CrawlResult.content_id == int(content_id))
-    if start_date:
-        query = query.filter(CrawlResult.created_at >= datetime.fromisoformat(start_date))
-    if end_date:
-        query = query.filter(CrawlResult.created_at <= datetime.fromisoformat(end_date))
+        query = query.join(Website, MonitorTask.website).filter(Website.id == website_id)
+    if status:
+        query = query.filter(CrawlLog.status == status)
 
-    query = query.options(
-        selectinload(CrawlResult.task),
-        selectinload(CrawlResult.website),
-        selectinload(CrawlResult.content).selectinload(WatchContent.category),
-    )
+    start_date = start_date_raw
+    end_date = end_date_raw
+
+    if start_date_raw:
+        try:
+            start_dt = datetime.fromisoformat(start_date_raw)
+            query = query.filter(CrawlLog.run_started_at >= start_dt)
+        except ValueError:
+            flash("开始日期格式不正确", "warning")
+            start_date = ""
+    if end_date_raw:
+        try:
+            end_dt = datetime.fromisoformat(end_date_raw)
+            query = query.filter(CrawlLog.run_started_at <= end_dt)
+        except ValueError:
+            flash("结束日期格式不正确", "warning")
+            end_date = ""
+
+    query = query.order_by(CrawlLog.run_started_at.desc())
 
     page = int(request.args.get("page", "1") or 1)
     per_page = 10
     total = query.count()
-    results = (
-        query.order_by(CrawlResult.created_at.desc())
+    logs = (
+        query.options(
+            joinedload(CrawlLog.task).joinedload(MonitorTask.website),
+            selectinload(CrawlLog.entries),
+        )
         .offset((page - 1) * per_page)
         .limit(per_page)
         .all()
@@ -775,27 +816,28 @@ def list_results() -> Any:
 
     tasks = session.query(MonitorTask).all()
     websites = session.query(Website).all()
-    categories = (
-        session.query(ContentCategory)
-        .options(selectinload(ContentCategory.contents))
-        .order_by(ContentCategory.name)
-        .all()
-    )
+
+    status_choices = {
+        "running": "执行中",
+        "success": "成功",
+        "completed": "已完成",
+        "failed": "失败",
+    }
 
     return render_template(
         "results/list.html",
-        results=results,
+        logs=logs,
         tasks=tasks,
         websites=websites,
-        categories=categories,
+        status_choices=status_choices,
         page=page,
         total_pages=total_pages,
         query_args={
-            "task_id": task_id or "",
-            "website_id": website_id or "",
-            "content_id": content_id or "",
-            "start_date": start_date or "",
-            "end_date": end_date or "",
+            "task_id": str(task_id or ""),
+            "website_id": str(website_id or ""),
+            "status": status or "",
+            "start_date": start_date,
+            "end_date": end_date,
         },
     )
 

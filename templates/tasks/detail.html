@@ -30,6 +30,9 @@
             未配置
           {% endif %}
         </p>
+        {% if task.website and task.website.last_snapshot %}
+        <p class="mb-1"><a href="{{ url_for('view_website_snapshot', website_id=task.website.id) }}" class="link-primary">查看最近抓取快照</a></p>
+        {% endif %}
         <p class="mb-1"><strong>关注内容：</strong>
           {% if task.watch_contents %}
             {% for content in task.watch_contents %}
