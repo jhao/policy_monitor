@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from collections import Counter
+from collections import Counter, OrderedDict
 from datetime import datetime
 from html import escape as html_escape
 from typing import Any, Callable, Iterable, List, Sequence
@@ -842,7 +842,8 @@ def run_task(task_id: int) -> None:
                 else:
                     add_detail("子链接未发现标题", "warning")
                 subpage_snapshots[-1]["title"] = title
-                scores = score_contents(title, summary, task.watch_contents)
+                # 关键关注内容仅匹配子页面标题
+                scores = score_contents(title, title, task.watch_contents)
                 matches = [(content, score) for content, score in scores if score >= SIMILARITY_THRESHOLD]
                 if matches:
                     matched_contents = ", ".join(f"{content.text}({score:.2f})" for content, score in matches)
@@ -934,19 +935,47 @@ def run_task(task_id: int) -> None:
         session.commit()
 
         if matched_results:
-            payload_items: list[dict[str, str]] = []
+            merged_payload: OrderedDict[str, dict[str, Any]] = OrderedDict()
             for item in matched_results:
-                matches_label = "、".join(
-                    f"{content.text}({score:.2f})" for content, score in item["matches"]
-                )
+                url = item["url"]
+                summary_text = (item["summary"] or "")[:200]
                 image_url = _extract_first_image_url(item.get("html"), item.get("base_url")) or ""
+                if url not in merged_payload:
+                    merged_payload[url] = {
+                        "title": item["title"] or url,
+                        "url": url,
+                        "summary": summary_text,
+                        "pic": image_url,
+                        "matches_map": OrderedDict(),
+                    }
+                entry = merged_payload[url]
+                if entry["title"] == entry["url"] and item["title"]:
+                    entry["title"] = item["title"]
+                if not entry["summary"] and summary_text:
+                    entry["summary"] = summary_text
+                if image_url and not entry["pic"]:
+                    entry["pic"] = image_url
+                matches_map: OrderedDict[Any, dict[str, Any]] = entry["matches_map"]
+                for content, score in item["matches"]:
+                    identifier = getattr(content, "id", None) or content.text
+                    existing = matches_map.get(identifier)
+                    if existing is None:
+                        matches_map[identifier] = {"text": content.text, "score": score}
+                    elif score > existing["score"]:
+                        existing["score"] = score
+
+            payload_items: list[dict[str, str]] = []
+            for entry in merged_payload.values():
+                matches_label = "、".join(
+                    f"{value['text']}({value['score']:.2f})" for value in entry["matches_map"].values()
+                )
                 payload_items.append(
                     {
-                        "title": item["title"] or item["url"],
-                        "url": item["url"],
-                        "summary": (item["summary"] or "")[:200],
+                        "title": entry["title"],
+                        "url": entry["url"],
+                        "summary": entry["summary"],
                         "matches": matches_label,
-                        "pic": image_url,
+                        "pic": entry["pic"],
                     }
                 )
             _send_task_notifications(session, task, payload_items, add_detail)
