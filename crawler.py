@@ -193,9 +193,27 @@ class CrawlError(RuntimeError):
     pass
 
 
+DEFAULT_REQUEST_HEADERS: dict[str, str] = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+}
+
+
 def _fetch_html_with_requests(url: str) -> str:
-    response = requests.get(url, timeout=20)
-    response.raise_for_status()
+    response = requests.get(url, timeout=20, headers=DEFAULT_REQUEST_HEADERS)
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        status = response.status_code
+        message = f"请求 {url} 失败，状态码 {status}"
+        if status == 403:
+            message += "，可能需要浏览器访问或额外的身份验证"
+        raise CrawlError(message) from exc
     if not response.encoding or response.encoding.lower() == "iso-8859-1":
         apparent = response.apparent_encoding
         if apparent:
