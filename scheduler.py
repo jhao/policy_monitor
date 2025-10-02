@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 
 from database import SessionLocal
 from models import MonitorTask
+from sqlalchemy.orm import selectinload
 from crawler import run_task
 
 LOGGER = logging.getLogger(__name__)
@@ -42,7 +43,12 @@ class MonitorScheduler:
     def _process_tasks(self) -> None:
         session = SessionLocal()
         try:
-            tasks = session.query(MonitorTask).filter(MonitorTask.is_active.is_(True)).all()
+            tasks = (
+                session.query(MonitorTask)
+                .options(selectinload(MonitorTask.website))
+                .filter(MonitorTask.is_active.is_(True))
+                .all()
+            )
             now = datetime.utcnow()
             for task in tasks:
                 website = task.website
