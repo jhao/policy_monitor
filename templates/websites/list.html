@@ -21,7 +21,9 @@
     {% for website in websites %}
     <tr>
       <td>{{ website.name }}</td>
-      <td><a href="{{ website.url }}" target="_blank">{{ website.url }}</a></td>
+      <td>
+        <a href="{{ website.url }}" target="_blank" rel="noopener noreferrer">访问网站</a>
+      </td>
       <td>{{ '是' if website.fetch_subpages else '否' }}</td>
       <td>{{ website.interval_minutes }}</td>
       <td>{{ website.last_fetched_at or '尚未抓取' }}</td>
