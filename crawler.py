@@ -8,7 +8,7 @@ from collections import Counter, OrderedDict
 from datetime import datetime
 from html import escape as html_escape
 from typing import Any, Callable, Iterable, List, Sequence
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 import requests
 from bs4 import BeautifulSoup
@@ -33,6 +33,8 @@ from models import (
 )
 
 from nlp import similarity
+from proxy_service import proxy_manager
+from request_profiles import get_profile_headers
 
 SIMILARITY_THRESHOLD = 0.6
 LOGGER = logging.getLogger(__name__)
@@ -325,17 +327,32 @@ def _build_browser_like_headers(url: str) -> dict[str, str]:
 
 
 def _fetch_html_with_requests(url: str, *, overrides: dict[str, str] | None = None) -> str:
+    profile_headers = get_profile_headers(url)
     headers_sequence = []
     for base_headers in (DEFAULT_REQUEST_HEADERS, _build_browser_like_headers(url)):
         headers = base_headers.copy()
+        headers.update(profile_headers)
         if overrides:
             headers.update(overrides)
         headers_sequence.append(headers)
+
+    origin = None
+    ajax_retry_added = False
     response: requests.Response | None = None
 
-    for attempt, headers in enumerate(headers_sequence, start=1):
-        response = requests.get(url, timeout=20, headers=headers)
+    attempt = 0
+    while attempt < len(headers_sequence):
+        headers = headers_sequence[attempt]
+        attempt += 1
+        proxies = proxy_manager.get_next_proxy()
+        if proxies:
+            LOGGER.debug(
+                "使用代理请求 %s，代理类型: %s",
+                url,
+                ",".join(sorted(proxies.keys())),
+            )
         try:
+            response = requests.get(url, timeout=20, headers=headers, proxies=proxies)
             response.raise_for_status()
             break
         except requests.HTTPError as exc:
@@ -343,10 +360,33 @@ def _fetch_html_with_requests(url: str, *, overrides: dict[str, str] | None = No
             if status == 403 and attempt < len(headers_sequence):
                 LOGGER.info("请求 %s 返回 403，尝试使用更接近浏览器的请求头重试", url)
                 continue
+            if (
+                status == 418
+                and overrides
+                and "X-Requested-With" in overrides
+                and not ajax_retry_added
+            ):
+                if origin is None:
+                    parsed = urlsplit(url)
+                    origin = f"{parsed.scheme}://{parsed.netloc}"
+                ajax_headers = headers.copy()
+                ajax_headers.setdefault("Origin", origin)
+                ajax_headers.setdefault("Referer", f"{origin}/")
+                headers_sequence.insert(attempt, ajax_headers)
+                ajax_retry_added = True
+                LOGGER.info("请求 %s 返回 418，尝试补充 AJAX 相关请求头后重试", url)
+                continue
             message = f"请求 {url} 失败，状态码 {status}"
             if status == 403:
                 message += "，可能需要浏览器访问或额外的身份验证"
+            if status == 418:
+                message += "，可能被目标站点的反爬虫策略拦截"
             raise CrawlError(message) from exc
+        except requests.RequestException as exc:
+            LOGGER.warning("请求 %s 出现网络错误: %s", url, exc)
+            if attempt < len(headers_sequence):
+                continue
+            raise CrawlError(f"请求 {url} 失败：{exc}") from exc
     else:  # pragma: no cover - 保底分支
         raise CrawlError(f"无法成功请求 {url}")
 

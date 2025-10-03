@@ -68,3 +68,41 @@ def init_db() -> None:
             connection.exec_driver_sql(
                 "ALTER TABLE notification_logs ADD COLUMN payload TEXT"
             )
+
+    from models import ProxyEndpoint
+
+    session = SessionLocal()
+    try:
+        if session.query(ProxyEndpoint).count() == 0:
+            defaults = [
+                {
+                    "name": "本地示例代理",
+                    "http_url": "http://127.0.0.1:7890",
+                    "https_url": "http://127.0.0.1:7890",
+                },
+                {
+                    "name": "备用代理 A",
+                    "http_url": "http://192.0.2.10:8080",
+                    "https_url": "http://192.0.2.10:8080",
+                },
+                {
+                    "name": "备用代理 B",
+                    "http_url": "http://198.51.100.23:3128",
+                    "https_url": "http://198.51.100.23:3128",
+                },
+                {
+                    "name": "备用代理 C",
+                    "http_url": "http://203.0.113.45:8000",
+                    "https_url": "http://203.0.113.45:8000",
+                },
+                {
+                    "name": "备用代理 D",
+                    "http_url": "http://203.0.113.99:9000",
+                    "https_url": "http://203.0.113.99:9000",
+                },
+            ]
+            for item in defaults:
+                session.add(ProxyEndpoint(**item))
+            session.commit()
+    finally:
+        session.close()

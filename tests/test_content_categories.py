@@ -9,6 +9,7 @@ from models import ContentCategory, WatchContent
 class ContentCategoryRoutesTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self.db_path = Path("data.db")
+        engine.dispose()
         if self.db_path.exists():
             self.db_path.unlink()
         Base.metadata.create_all(bind=engine)
@@ -19,6 +20,7 @@ class ContentCategoryRoutesTestCase(unittest.TestCase):
 
     def tearDown(self) -> None:
         SessionLocal.remove()
+        engine.dispose()
         Base.metadata.drop_all(bind=engine)
         if self.db_path.exists():
             self.db_path.unlink()

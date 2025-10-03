@@ -204,3 +204,31 @@ class NotificationLog(Base):
 
     task: Mapped[MonitorTask | None] = relationship("MonitorTask", back_populates="notification_logs")
 
+
+class ProxyEndpoint(Base):
+    __tablename__ = "proxy_endpoints"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    http_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    https_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    socks5_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    ftp_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    def to_requests_mapping(self) -> dict[str, str]:
+        mapping: dict[str, str] = {}
+        if self.http_url:
+            mapping["http"] = self.http_url
+        if self.https_url:
+            mapping["https"] = self.https_url
+        if self.socks5_url:
+            mapping["socks5"] = self.socks5_url
+        if self.ftp_url:
+            mapping["ftp"] = self.ftp_url
+        return mapping
+
