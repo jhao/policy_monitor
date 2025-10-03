@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 from datetime import datetime, timedelta
+import json
 from typing import Any
 
 from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
@@ -55,6 +56,17 @@ def inject_timezone_context() -> dict[str, str]:
     return {"current_timezone_display": tz_display}
 
 
+def _serialize_payload(payload: Any | None) -> str | None:
+    if payload is None:
+        return None
+    if isinstance(payload, str):
+        return payload
+    try:
+        return json.dumps(payload, ensure_ascii=False)
+    except TypeError:
+        return str(payload)
+
+
 def record_notification_log(
     session: Session,
     *,
@@ -63,6 +75,7 @@ def record_notification_log(
     target: str | None = None,
     message: str | None = None,
     task: MonitorTask | None = None,
+    payload: Any | None = None,
 ) -> None:
     log_entry = NotificationLog(
         task=task,
@@ -70,6 +83,7 @@ def record_notification_log(
         target=target,
         status=status,
         message=message,
+        payload=_serialize_payload(payload),
     )
     session.add(log_entry)
     session.commit()
@@ -447,8 +461,22 @@ def manage_notifications() -> Any:
                         status="failed",
                         target=None,
                         message="测试邮件发送失败：未提供收件人",
+                        payload={
+                            "format": "email",
+                            "subject": "【测试】政策监控通知",
+                            "recipients": [],
+                            "html": "",
+                            "text": "",
+                        },
                     )
                 else:
+                    payload_details = {
+                        "format": "email",
+                        "subject": "【测试】政策监控通知",
+                        "recipients": [target_recipient],
+                        "html": "<p>这是一封测试邮件，用于验证通知配置是否生效。</p>",
+                        "text": "这是一封测试邮件，用于验证通知配置是否生效。",
+                    }
                     try:
                         send_email(
                             subject="【测试】政策监控通知",
@@ -464,6 +492,7 @@ def manage_notifications() -> Any:
                             status="failed",
                             target=target_recipient,
                             message=str(exc) or "测试邮件发送失败",
+                            payload=payload_details,
                         )
                     except Exception as exc:  # noqa: BLE001
                         flash(f"测试邮件发送失败：{exc}", "danger")
@@ -473,6 +502,7 @@ def manage_notifications() -> Any:
                             status="failed",
                             target=target_recipient,
                             message=str(exc) or "测试邮件发送失败",
+                            payload=payload_details,
                         )
                     else:
                         flash(
@@ -485,9 +515,31 @@ def manage_notifications() -> Any:
                             status="success",
                             target=target_recipient,
                             message="测试邮件发送成功",
+                            payload=payload_details,
                         )
                 return redirect(url_for("manage_notifications"))
             if config_type == "dingtalk" and action == "test":
+                payload_details = {
+                    "format": "dingtalk",
+                    "payload": {
+                        "msgtype": "feedCard",
+                        "title": "\u00a0【订阅】测试数据",
+                        "feedCard": {
+                            "links": [
+                                {
+                                    "title": "测试标题1",
+                                    "messageURL": "https://www.dingtalk.com/",
+                                    "picURL": "https://img.alicdn.com/tfs/TB1NwmBEL9TBuNjy1zbXXXpepXa-2400-1218.png",
+                                },
+                                {
+                                    "title": "测试标题2",
+                                    "messageURL": "https://www.dingtalk.com/",
+                                    "picURL": "https://img.alicdn.com/tfs/TB1NwmBEL9TBuNjy1zbXXXpepXa-2400-1218.png",
+                                },
+                            ]
+                        },
+                    },
+                }
                 try:
                     webhook_url = send_dingtalk_message(
                         {
@@ -517,6 +569,7 @@ def manage_notifications() -> Any:
                         status="failed",
                         target=(dingtalk_setting.webhook_url if dingtalk_setting else None),
                         message=str(exc) or "测试钉钉通知发送失败",
+                        payload=payload_details,
                     )
                 except Exception as exc:  # noqa: BLE001
                     flash(f"测试钉钉通知失败：{exc}", "danger")
@@ -526,6 +579,7 @@ def manage_notifications() -> Any:
                         status="failed",
                         target=(dingtalk_setting.webhook_url if dingtalk_setting else None),
                         message=str(exc) or "测试钉钉通知发送失败",
+                        payload=payload_details,
                     )
                 else:
                     flash("测试钉钉通知已发送", "success")
@@ -535,6 +589,7 @@ def manage_notifications() -> Any:
                         status="success",
                         target=webhook_url,
                         message="测试钉钉通知发送成功",
+                        payload=payload_details,
                     )
                 return redirect(url_for("manage_notifications"))
             if config_type == "email":
@@ -607,6 +662,45 @@ def manage_notifications() -> Any:
         )
     finally:
         session.close()
+
+
+@app.route("/notifications/logs/delete", methods=["POST"])
+def delete_notification_logs() -> Any:
+    page = request.form.get("current_page", type=int)
+    selected_ids_raw = request.form.getlist("log_ids")
+    selected_ids: list[int] = []
+    for raw_id in selected_ids_raw:
+        try:
+            selected_ids.append(int(raw_id))
+        except (TypeError, ValueError):  # pragma: no cover - defensive
+            continue
+
+    if not selected_ids:
+        flash("请先选择需要删除的通知日志", "warning")
+        if page and page > 1:
+            return redirect(url_for("manage_notifications", page=page))
+        return redirect(url_for("manage_notifications"))
+
+    session = SessionLocal()
+    try:
+        logs = (
+            session.query(NotificationLog)
+            .filter(NotificationLog.id.in_(selected_ids))
+            .all()
+        )
+        if not logs:
+            flash("未找到选中的通知日志", "warning")
+        else:
+            for log in logs:
+                session.delete(log)
+            session.commit()
+            flash(f"已删除 {len(logs)} 条通知日志", "success")
+    finally:
+        session.close()
+
+    if page and page > 1:
+        return redirect(url_for("manage_notifications", page=page))
+    return redirect(url_for("manage_notifications"))
 
 
 @app.route("/tasks")
@@ -970,6 +1064,89 @@ def stream_task_log_entries(task_id: int, log_id: int) -> Any:
     }
     session.close()
     return jsonify(response)
+
+
+@app.route("/tasks/<int:task_id>/logs/<int:log_id>/delete", methods=["POST"])
+def delete_task_log(task_id: int, log_id: int) -> Any:
+    page = request.form.get("current_page", type=int)
+    session = SessionLocal()
+    try:
+        log = (
+            session.query(CrawlLog)
+            .filter(CrawlLog.task_id == task_id, CrawlLog.id == log_id)
+            .one_or_none()
+        )
+        if not log:
+            flash("执行日志不存在或已被删除", "warning")
+        elif log.status == "running":
+            flash("正在执行的日志无法删除", "warning")
+        else:
+            session.delete(log)
+            session.commit()
+            flash("执行日志已删除", "success")
+    finally:
+        session.close()
+
+    if page and page > 1:
+        return redirect(url_for("view_task", task_id=task_id, page=page))
+    return redirect(url_for("view_task", task_id=task_id))
+
+
+@app.route("/tasks/<int:task_id>/logs/bulk-delete", methods=["POST"])
+def bulk_delete_task_logs(task_id: int) -> Any:
+    page = request.form.get("current_page", type=int)
+    cutoff_raw = (request.form.get("cutoff", "") or "").strip()
+    if not cutoff_raw:
+        flash("请先选择需要删除的时间", "warning")
+        if page and page > 1:
+            return redirect(url_for("view_task", task_id=task_id, page=page))
+        return redirect(url_for("view_task", task_id=task_id))
+
+    try:
+        cutoff_dt = datetime.fromisoformat(cutoff_raw)
+    except ValueError:
+        flash("时间格式不正确，请重新选择", "warning")
+        if page and page > 1:
+            return redirect(url_for("view_task", task_id=task_id, page=page))
+        return redirect(url_for("view_task", task_id=task_id))
+
+    session = SessionLocal()
+    try:
+        logs = (
+            session.query(CrawlLog)
+            .filter(CrawlLog.task_id == task_id)
+            .filter(CrawlLog.run_started_at <= cutoff_dt)
+            .all()
+        )
+        if not logs:
+            flash("未找到符合条件的执行日志", "info")
+            return redirect(
+                url_for("view_task", task_id=task_id, page=page) if page and page > 1 else url_for("view_task", task_id=task_id)
+            )
+
+        running_count = sum(1 for log in logs if log.status == "running")
+        deletable_logs = [log for log in logs if log.status != "running"]
+
+        if not deletable_logs:
+            flash("存在正在执行的日志，无法执行删除", "warning")
+            return redirect(
+                url_for("view_task", task_id=task_id, page=page) if page and page > 1 else url_for("view_task", task_id=task_id)
+            )
+
+        for log in deletable_logs:
+            session.delete(log)
+        session.commit()
+
+        message = f"已删除 {len(deletable_logs)} 条执行日志"
+        if running_count:
+            message += f"，跳过 {running_count} 条正在执行的日志"
+        flash(message, "success")
+    finally:
+        session.close()
+
+    if page and page > 1:
+        return redirect(url_for("view_task", task_id=task_id, page=page))
+    return redirect(url_for("view_task", task_id=task_id))
 
 
 @app.route("/tasks/<int:task_id>/delete", methods=["POST"])

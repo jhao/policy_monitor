@@ -598,6 +598,17 @@ def _build_notification_email_html(task: MonitorTask, items: list[dict[str, str]
     return "".join(blocks)
 
 
+def _serialize_notification_payload(payload: Any | None) -> str | None:
+    if payload is None:
+        return None
+    if isinstance(payload, str):
+        return payload
+    try:
+        return json.dumps(payload, ensure_ascii=False)
+    except TypeError:
+        return str(payload)
+
+
 def _record_notification_log(
     session: Session,
     task: MonitorTask | None,
@@ -605,6 +616,8 @@ def _record_notification_log(
     target: str | None,
     status: str,
     message: str | None,
+    *,
+    payload: Any | None = None,
 ) -> None:
     log_entry = NotificationLog(
         task=task,
@@ -612,6 +625,7 @@ def _record_notification_log(
         target=target,
         status=status,
         message=message,
+        payload=_serialize_notification_payload(payload),
     )
     session.add(log_entry)
     session.commit()
@@ -656,6 +670,15 @@ def _send_task_notifications(
                 target=None,
                 status="failed",
                 message=str(exc) or "钉钉通知配置缺失",
+                payload={
+                    "format": "dingtalk",
+                    "links": links,
+                    "payload": {
+                        "msgtype": "feedCard",
+                        "title": f"监控任务：{task.name}",
+                        "feedCard": {"links": links},
+                    },
+                },
             )
         except Exception as exc:  # noqa: BLE001
             LOGGER.exception("任务 %s 发送钉钉通知失败", task.id)
@@ -668,6 +691,15 @@ def _send_task_notifications(
                 target=None,
                 status="failed",
                 message=str(exc) or "钉钉通知发送失败",
+                payload={
+                    "format": "dingtalk",
+                    "links": links,
+                    "payload": {
+                        "msgtype": "feedCard",
+                        "title": f"监控任务：{task.name}",
+                        "feedCard": {"links": links},
+                    },
+                },
             )
         else:
             if detail_callback:
@@ -679,6 +711,15 @@ def _send_task_notifications(
                 target=webhook_url,
                 status="success",
                 message=f"已成功发送 {len(payload_items)} 条更新",
+                payload={
+                    "format": "dingtalk",
+                    "links": links,
+                    "payload": {
+                        "msgtype": "feedCard",
+                        "title": f"监控任务：{task.name}",
+                        "feedCard": {"links": links},
+                    },
+                },
             )
         return
 
@@ -698,6 +739,13 @@ def _send_task_notifications(
             target=None,
             status="failed",
             message="未配置通知邮箱",
+            payload={
+                "format": "email",
+                "subject": f"监控任务 {task.name} 有新内容",
+                "html": "",
+                "text": "",
+                "recipients": recipients,
+            },
         )
         return
 
@@ -735,6 +783,13 @@ def _send_task_notifications(
             target=", ".join(recipients),
             status="failed",
             message=str(exc) or "邮件通知配置缺失",
+            payload={
+                "format": "email",
+                "subject": f"监控任务 {task.name} 有新内容",
+                "html": html_body,
+                "text": "\n".join(text_lines),
+                "recipients": recipients,
+            },
         )
     except Exception as exc:  # noqa: BLE001
         LOGGER.exception("任务 %s 发送邮件失败", task.id)
@@ -747,6 +802,13 @@ def _send_task_notifications(
             target=", ".join(recipients),
             status="failed",
             message=str(exc) or "邮件发送失败",
+            payload={
+                "format": "email",
+                "subject": f"监控任务 {task.name} 有新内容",
+                "html": html_body,
+                "text": "\n".join(text_lines),
+                "recipients": recipients,
+            },
         )
     else:
         if detail_callback:
@@ -758,6 +820,13 @@ def _send_task_notifications(
             target=", ".join(recipients),
             status="success",
             message=f"已成功发送 {len(payload_items)} 条更新",
+            payload={
+                "format": "email",
+                "subject": f"监控任务 {task.name} 有新内容",
+                "html": html_body,
+                "text": "\n".join(text_lines),
+                "recipients": recipients,
+            },
         )
 
 

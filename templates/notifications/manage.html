@@ -69,66 +69,83 @@
 
 <div class="card">
   <div class="card-header d-flex justify-content-between align-items-center">
-    <span>发送日志</span>
-    <span class="badge text-bg-secondary">共 {{ log_total }} 条</span>
-  </div>
-  <div class="card-body p-0">
-    <div class="table-responsive">
-      <table class="table table-striped mb-0">
-        <thead>
-          <tr>
-            <th scope="col" style="width: 20%;">时间</th>
-            <th scope="col" style="width: 15%;">渠道</th>
-            <th scope="col">目标</th>
-            <th scope="col" style="width: 10%;">状态</th>
-            <th scope="col">说明</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for log in notification_logs %}
-          <tr>
-            <td>{{ log.created_at|format_datetime or '未知' }}</td>
-            <td>{{ '邮件' if log.channel == 'email' else '钉钉' }}</td>
-            <td class="text-truncate" style="max-width: 260px;" title="{{ log.target }}">{{ log.target or '未提供' }}</td>
-            <td>
-              {% if log.status == 'success' %}
-              <span class="badge text-bg-success">成功</span>
-              {% elif log.status == 'failed' %}
-              <span class="badge text-bg-danger">失败</span>
-              {% else %}
-              <span class="badge text-bg-secondary">{{ log.status }}</span>
-              {% endif %}
-            </td>
-            <td>
-              {% if log.message %}
-              <button
-                type="button"
-                class="btn btn-link p-0 align-baseline"
-                data-bs-toggle="modal"
-                data-bs-target="#logMessageModal"
-                data-message="{{ log.message|e }}"
-                data-channel-label="{{ '邮件' if log.channel == 'email' else '钉钉' }}"
-                data-status-label="{{ '成功' if log.status == 'success' else '失败' if log.status == 'failed' else log.status }}"
-                data-target="{{ (log.target or '')|e }}"
-                data-created-at="{{ log.created_at|format_datetime or '' }}"
-                title="点击查看详情"
-              >
-                {{ log.message|truncate(32, True, '…') }}
-              </button>
-              {% else %}
-              —
-              {% endif %}
-            </td>
-          </tr>
-          {% else %}
-          <tr>
-            <td colspan="5" class="text-center text-muted py-4">暂无发送记录</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+    <div class="d-flex align-items-center gap-2">
+      <span>发送日志</span>
+      <span class="badge text-bg-secondary">共 {{ log_total }} 条</span>
     </div>
+    <button type="submit" form="notificationLogForm" class="btn btn-sm btn-outline-danger" id="deleteLogsButton" onclick="return confirm('确定删除选中的通知日志吗？');" {% if not notification_logs %}disabled{% endif %}>删除选中</button>
   </div>
+  <form id="notificationLogForm" method="post" action="{{ url_for('delete_notification_logs') }}">
+    <input type="hidden" name="current_page" value="{{ log_page }}">
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-striped mb-0 align-middle">
+          <thead>
+            <tr>
+              <th scope="col" class="text-center" style="width: 4%;">
+                <input class="form-check-input" type="checkbox" id="selectAllLogs" {% if not notification_logs %}disabled{% endif %}>
+              </th>
+              <th scope="col" style="width: 18%;">时间</th>
+              <th scope="col" style="width: 15%;">渠道</th>
+              <th scope="col">目标</th>
+              <th scope="col" style="width: 10%;">状态</th>
+              <th scope="col">详情</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for log in notification_logs %}
+            <tr>
+              <td class="text-center">
+                <input class="form-check-input log-checkbox" type="checkbox" name="log_ids" value="{{ log.id }}">
+              </td>
+              <td>{{ log.created_at|format_datetime or '未知' }}</td>
+              <td>{{ '邮件' if log.channel == 'email' else '钉钉' }}</td>
+              <td class="text-truncate" style="max-width: 260px;" title="{{ log.target }}">{{ log.target or '未提供' }}</td>
+              <td>
+                {% if log.status == 'success' %}
+                <span class="badge text-bg-success">成功</span>
+                {% elif log.status == 'failed' %}
+                <span class="badge text-bg-danger">失败</span>
+                {% else %}
+                <span class="badge text-bg-secondary">{{ log.status }}</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if log.message or log.payload %}
+                <button
+                  type="button"
+                  class="btn btn-link p-0 align-baseline"
+                  data-bs-toggle="modal"
+                  data-bs-target="#logMessageModal"
+                  data-message="{{ (log.message or '')|e }}"
+                  data-payload='{{ log.payload|tojson|safe }}'
+                  data-channel-label="{{ '邮件' if log.channel == 'email' else '钉钉' }}"
+                  data-status-label="{{ '成功' if log.status == 'success' else '失败' if log.status == 'failed' else log.status }}"
+                  data-target="{{ (log.target or '')|e }}"
+                  data-created-at="{{ log.created_at|format_datetime or '' }}"
+                  title="点击查看详情"
+                >
+                  {% if log.message %}
+                  {{ log.message|truncate(32, True, '…') }}
+                  {% else %}
+                  查看内容
+                  {% endif %}
+                </button>
+                {% else %}
+                —
+                {% endif %}
+              </td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="6" class="text-center text-muted py-4">暂无发送记录</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </form>
   {% if log_total_pages > 1 %}
   <div class="card-footer">
     <nav aria-label="发送日志分页">
@@ -159,7 +176,14 @@
       </div>
       <div class="modal-body">
         <p class="text-muted small" id="logMessageModalMeta"></p>
-        <pre id="logMessageModalBody" class="bg-light border rounded p-3 mb-0" style="white-space: pre-wrap;"></pre>
+        <div id="logMessageContainer" class="mb-3 d-none">
+          <h6 class="fw-semibold">状态说明</h6>
+          <pre id="logMessageModalBody" class="bg-light border rounded p-3 mb-0" style="white-space: pre-wrap;"></pre>
+        </div>
+        <div id="logPayloadContainer" class="d-none">
+          <h6 class="fw-semibold">发送内容预览</h6>
+          <div id="logPayloadPreview" class="border rounded bg-white"></div>
+        </div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
@@ -179,7 +203,11 @@
       var modalTitle = messageModal.querySelector('.modal-title');
       var modalMeta = document.getElementById('logMessageModalMeta');
       var modalBody = document.getElementById('logMessageModalBody');
+      var messageContainer = document.getElementById('logMessageContainer');
+      var payloadContainer = document.getElementById('logPayloadContainer');
+      var payloadPreview = document.getElementById('logPayloadPreview');
       var message = trigger ? trigger.getAttribute('data-message') || '' : '';
+      var rawPayload = trigger ? trigger.getAttribute('data-payload') || '' : '';
       var channelLabel = trigger ? trigger.getAttribute('data-channel-label') || '' : '';
       var statusLabel = trigger ? trigger.getAttribute('data-status-label') || '' : '';
       var target = trigger ? trigger.getAttribute('data-target') || '' : '';
@@ -191,8 +219,104 @@
       if (statusLabel) metaItems.push('状态：' + statusLabel);
       if (target) metaItems.push('目标：' + target);
       modalMeta.textContent = metaItems.join(' · ');
-      modalBody.textContent = message || '无详细信息';
+      if (messageContainer) {
+        if (message) {
+          messageContainer.classList.remove('d-none');
+          modalBody.textContent = message;
+        } else {
+          messageContainer.classList.add('d-none');
+          modalBody.textContent = '';
+        }
+      }
+
+      if (payloadContainer && payloadPreview) {
+        payloadContainer.classList.add('d-none');
+        payloadPreview.innerHTML = '';
+        if (rawPayload && rawPayload !== 'null') {
+          var parsedPayload = null;
+          try {
+            var payloadString = JSON.parse(rawPayload);
+            if (payloadString) {
+              try {
+                parsedPayload = JSON.parse(payloadString);
+              } catch (innerErr) {
+                parsedPayload = payloadString;
+              }
+            }
+          } catch (err) {
+            parsedPayload = null;
+          }
+
+          if (parsedPayload) {
+            payloadContainer.classList.remove('d-none');
+            if (typeof parsedPayload === 'object' && !Array.isArray(parsedPayload)) {
+              if (parsedPayload.recipients && parsedPayload.recipients.length) {
+                var recipientsEl = document.createElement('p');
+                recipientsEl.className = 'small text-muted mb-2';
+                recipientsEl.textContent = '收件人：' + parsedPayload.recipients.join(', ');
+                payloadPreview.appendChild(recipientsEl);
+              }
+              if (parsedPayload.format === 'email' && parsedPayload.html) {
+                var iframe = document.createElement('iframe');
+                iframe.className = 'w-100 border';
+                iframe.style.minHeight = '240px';
+                iframe.setAttribute('sandbox', '');
+                iframe.srcdoc = parsedPayload.html;
+                payloadPreview.appendChild(iframe);
+              } else {
+                var pre = document.createElement('pre');
+                pre.className = 'mb-0 bg-light border rounded p-3';
+                pre.style.whiteSpace = 'pre-wrap';
+                pre.textContent = JSON.stringify(parsedPayload, null, 2);
+                payloadPreview.appendChild(pre);
+              }
+            } else {
+              var textPre = document.createElement('pre');
+              textPre.className = 'mb-0 bg-light border rounded p-3';
+              textPre.style.whiteSpace = 'pre-wrap';
+              textPre.textContent = String(parsedPayload);
+              payloadPreview.appendChild(textPre);
+            }
+          }
+        }
+      }
     });
+
+    var logForm = document.getElementById('notificationLogForm');
+    var deleteButton = document.getElementById('deleteLogsButton');
+    var selectAll = document.getElementById('selectAllLogs');
+    var checkboxList = logForm ? Array.prototype.slice.call(logForm.querySelectorAll('.log-checkbox')) : [];
+
+    function updateDeleteState() {
+      if (!deleteButton) {
+        return;
+      }
+      var anyChecked = checkboxList.some(function (item) { return item.checked; });
+      deleteButton.disabled = !anyChecked;
+    }
+
+    if (selectAll && checkboxList.length) {
+      selectAll.addEventListener('change', function () {
+        var checked = selectAll.checked;
+        checkboxList.forEach(function (item) {
+          item.checked = checked;
+        });
+        updateDeleteState();
+      });
+    }
+
+    checkboxList.forEach(function (checkbox) {
+      checkbox.addEventListener('change', function () {
+        if (selectAll && !checkbox.checked) {
+          selectAll.checked = false;
+        } else if (selectAll && checkboxList.every(function (item) { return item.checked; })) {
+          selectAll.checked = true;
+        }
+        updateDeleteState();
+      });
+    });
+
+    updateDeleteState();
   });
 </script>
 {% endblock %}

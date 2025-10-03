@@ -70,7 +70,22 @@
   </div>
 </div>
 
-<h3 class="h5">执行日志</h3>
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+  <h3 class="h5 mb-0">执行日志</h3>
+  <div class="d-flex flex-wrap align-items-center gap-2 small text-muted">
+    <span>共 {{ total_logs }} 条</span>
+    <form class="row row-cols-lg-auto g-2 align-items-end" method="post" action="{{ url_for('bulk_delete_task_logs', task_id=task.id) }}">
+      <input type="hidden" name="current_page" value="{{ page }}">
+      <div class="col">
+        <label class="form-label mb-0">删除此时间及之前的日志</label>
+        <input type="datetime-local" class="form-control form-control-sm" name="cutoff" required>
+      </div>
+      <div class="col">
+        <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('确定删除选定时间之前的日志吗？');">批量删除</button>
+      </div>
+    </form>
+  </div>
+</div>
 {% if logs %}
   <div class="accordion" id="logAccordion">
     {% for log in logs %}
@@ -90,7 +105,13 @@
         </h2>
         <div id="log-body-{{ log.id }}" class="accordion-collapse collapse {% if is_running %}show{% endif %}" aria-labelledby="heading-{{ log.id }}" data-bs-parent="#logAccordion">
           <div class="accordion-body">
-            <p class="text-muted mb-3" data-log-message>{{ log.message or '暂无汇总信息' }}</p>
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+              <p class="text-muted mb-0 flex-grow-1" data-log-message>{{ log.message or '暂无汇总信息' }}</p>
+              <form method="post" action="{{ url_for('delete_task_log', task_id=task.id, log_id=log.id) }}" class="ms-auto">
+                <input type="hidden" name="current_page" value="{{ page }}">
+                <button type="submit" class="btn btn-sm btn-outline-danger" {% if is_running %}disabled title="执行中的日志暂时无法删除"{% else %}onclick="return confirm('确定删除该执行日志吗？');"{% endif %}>删除此日志</button>
+              </form>
+            </div>
             <ul class="list-unstyled mb-0 log-entry-list">
               {% for entry in log.entries %}
               <li class="mb-2" data-entry-id="{{ entry.id }}">
