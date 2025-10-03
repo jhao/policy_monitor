@@ -31,3 +31,12 @@ def init_db() -> None:
             connection.exec_driver_sql(
                 "ALTER TABLE websites ADD COLUMN content_selector_config TEXT"
             )
+
+        notification_columns = {
+            row[1]
+            for row in connection.exec_driver_sql("PRAGMA table_info(notification_logs)").fetchall()
+        }
+        if "payload" not in notification_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE notification_logs ADD COLUMN payload TEXT"
+            )

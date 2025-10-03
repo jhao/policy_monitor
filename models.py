@@ -192,6 +192,7 @@ class NotificationLog(Base):
     target: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payload: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     task: Mapped[MonitorTask | None] = relationship("MonitorTask", back_populates="notification_logs")
