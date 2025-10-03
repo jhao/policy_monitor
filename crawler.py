@@ -252,6 +252,12 @@ DEFAULT_REQUEST_HEADERS: dict[str, str] = {
 }
 
 
+JSON_API_REQUEST_OVERRIDES: dict[str, str] = {
+    "Accept": "application/json, text/plain, */*",
+    "X-Requested-With": "XMLHttpRequest",
+}
+
+
 def _build_browser_like_headers(url: str) -> dict[str, str]:
     """Return headers that mimic an actual browser request."""
 
@@ -271,8 +277,13 @@ def _build_browser_like_headers(url: str) -> dict[str, str]:
     return headers
 
 
-def _fetch_html_with_requests(url: str) -> str:
-    headers_sequence = [DEFAULT_REQUEST_HEADERS, _build_browser_like_headers(url)]
+def _fetch_html_with_requests(url: str, *, overrides: dict[str, str] | None = None) -> str:
+    headers_sequence = []
+    for base_headers in (DEFAULT_REQUEST_HEADERS, _build_browser_like_headers(url)):
+        headers = base_headers.copy()
+        if overrides:
+            headers.update(overrides)
+        headers_sequence.append(headers)
     response: requests.Response | None = None
 
     for attempt, headers in enumerate(headers_sequence, start=1):
@@ -351,7 +362,7 @@ def fetch_html(url: str) -> str:
 def fetch_json_content(url: str) -> tuple[str, Any]:
     """Fetch JSON payload from the given URL."""
 
-    text = _fetch_html_with_requests(url)
+    text = _fetch_html_with_requests(url, overrides=JSON_API_REQUEST_OVERRIDES)
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:  # pragma: no cover - unexpected format
