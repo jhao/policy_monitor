@@ -15,6 +15,28 @@
     <input type="number" class="form-control" name="interval" min="1" value="{{ website.interval_minutes if website else 60 }}">
   </div>
 
+  <div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-light fw-semibold">访问控制</div>
+    <div class="card-body">
+      <div class="form-check form-switch mb-3">
+        <input class="form-check-input" type="checkbox" name="use_proxy" id="useProxy" {% if website and website.use_proxy %}checked{% endif %}>
+        <label class="form-check-label" for="useProxy">启用代理抓取</label>
+      </div>
+      <div id="proxyAdvanced" class="row g-3 align-items-end{% if not (website and website.use_proxy) %} d-none{% endif %}">
+        <div class="col-md-4">
+          <label class="form-label">请求间隔(秒)</label>
+          <input type="number" class="form-control" name="proxy_request_interval" min="0" step="1" value="{{ website.proxy_request_interval if website else 0 }}">
+          <div class="form-text">每次请求之间的最小等待时间，建议设置为 1 秒或以上以降低触发风控风险。</div>
+        </div>
+        <div class="col-md-8">
+          <label class="form-label">自定义 User-Agent</label>
+          <input type="text" class="form-control" name="proxy_user_agent" placeholder="留空时自动轮换常见浏览器 UA" value="{{ website.proxy_user_agent if website and website.proxy_user_agent else '' }}">
+          <div class="form-text">当目标网站需要特定的客户端标识时可填写，否则建议留空使用系统随机分配。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="form-check form-switch mb-4">
     <input class="form-check-input" type="checkbox" name="is_json_api" id="isJsonApi" {% if website and website.is_json_api %}checked{% endif %}>
     <label class="form-check-label" for="isJsonApi">使用 JSON API 列表数据</label>
@@ -98,6 +120,8 @@
     var jsonApiConfig = document.getElementById('jsonApiConfig');
     var listConfig = document.getElementById('listConfig');
     var detailConfig = document.getElementById('detailConfig');
+    var useProxyCheckbox = document.getElementById('useProxy');
+    var proxyAdvanced = document.getElementById('proxyAdvanced');
 
     function toggleDetailSelectors() {
       if (isJsonApiCheckbox.checked) {
@@ -125,10 +149,20 @@
       toggleDetailSelectors();
     }
 
+    function toggleProxyConfig() {
+      if (useProxyCheckbox.checked) {
+        proxyAdvanced.classList.remove('d-none');
+      } else {
+        proxyAdvanced.classList.add('d-none');
+      }
+    }
+
     toggleDetailSelectors();
     toggleJsonApiConfig();
+    toggleProxyConfig();
     fetchSubpagesCheckbox.addEventListener('change', toggleDetailSelectors);
     isJsonApiCheckbox.addEventListener('change', toggleJsonApiConfig);
+    useProxyCheckbox.addEventListener('change', toggleProxyConfig);
   });
 </script>
 
