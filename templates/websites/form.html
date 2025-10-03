@@ -19,6 +19,13 @@
     <label class="form-check-label" for="fetchSubpages">需要抓取子页面</label>
   </div>
   <div class="mb-3">
+    <label class="form-label d-flex align-items-center gap-2">内容采集区域定位
+      <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#contentAreaHelpModal">填写说明</button>
+    </label>
+    <textarea class="form-control" name="content_area_selectors" rows="3" placeholder="例如：css=#main .article-list 或 xpath=//section[@data-type='policy']">{{ website.content_area_selector_config if website and website.content_area_selector_config else '' }}</textarea>
+    <div class="form-text">每行一条规则，与标题和正文定位的写法一致，按顺序匹配第一个找到的区域。</div>
+  </div>
+  <div class="mb-3">
     <label class="form-label">标题元素描述</label>
     <textarea class="form-control" name="title_selectors" rows="3" placeholder="例如：id=main-title 或 css=h1.article-title">{{ website.title_selector_config if website and website.title_selector_config else '' }}</textarea>
     <div class="form-text">每行一条规则，支持 <code>id=</code>、<code>class=</code>、<code>name=</code>、<code>css=</code>、<code>xpath=</code> 等写法，按顺序优先匹配。</div>
@@ -31,4 +38,29 @@
   <button class="btn btn-primary" type="submit">保存</button>
   <a class="btn btn-secondary" href="{{ url_for('list_websites') }}">返回</a>
 </form>
+
+<div class="modal fade" id="contentAreaHelpModal" tabindex="-1" aria-labelledby="contentAreaHelpModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="contentAreaHelpModalLabel">内容采集区域定位填写说明</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-3">内容采集区域用于限定爬虫分析的网页范围。每行写一条定位规则，系统会按顺序尝试，命中后即使用该区域。支持以下写法：</p>
+        <ul>
+          <li><strong>通过 <code>class</code> 定位：</strong> <code>class=main-content</code> 表示选择第一个 <code>class="main-content"</code> 的区域；如需多层嵌套，可写 <code>css=.main-content .list-wrapper</code>。</li>
+          <li><strong>通过标签(Tag)定位：</strong> <code>css=article</code> 或 <code>css=section.news-area</code> 可直接根据标签或标签组合限定区域。</li>
+          <li><strong>通过 <code>id</code> 定位：</strong> <code>id=primary</code> 会定位到 <code>id="primary"</code> 的块，常用于唯一的主体容器。</li>
+          <li><strong>通过 <code>name</code> 定位：</strong> <code>name=content</code> 适合匹配带有 <code>name</code> 属性的节点。</li>
+          <li><strong>通过 <code>xpath</code> 定位：</strong> <code>xpath=//div[@class='main']/section[1]</code> 可精确指定多层结构；也可以在同一条规则中写更细的路径，例如 <code>xpath=//section[@id='main']//li[contains(@class,'item')]</code>。</li>
+        </ul>
+        <p class="mb-0">可在多行中混合不同方式，系统会使用第一条成功命中的区域。建议优先从外层容器开始，必要时再补充更细粒度的 XPath 或 CSS 选择器。</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">我知道了</button>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}

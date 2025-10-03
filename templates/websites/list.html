@@ -12,6 +12,7 @@
       <th>抓取子页面</th>
       <th>时间间隔(分钟)</th>
       <th>最后抓取时间</th>
+      <th>内容区域定位</th>
       <th>标题定位</th>
       <th>正文定位</th>
       <th>操作</th>
@@ -27,6 +28,13 @@
       <td>{{ '是' if website.fetch_subpages else '否' }}</td>
       <td>{{ website.interval_minutes }}</td>
       <td>{{ website.last_fetched_at or '尚未抓取' }}</td>
+      <td>
+        {% if website.content_area_selector_config %}
+        <div class="small text-muted" style="white-space: pre-wrap;">{{ website.content_area_selector_config }}</div>
+        {% else %}
+        <span class="text-muted">—</span>
+        {% endif %}
+      </td>
       <td>
         {% if website.title_selector_config %}
         <div class="small text-muted" style="white-space: pre-wrap;">{{ website.title_selector_config }}</div>

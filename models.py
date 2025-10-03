@@ -40,6 +40,7 @@ class Website(Base):
     last_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
     title_selector_config: Mapped[str | None] = mapped_column(Text, nullable=True)
     content_selector_config: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_area_selector_config: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     tasks: Mapped[List["MonitorTask"]] = relationship("MonitorTask", back_populates="website")
 
