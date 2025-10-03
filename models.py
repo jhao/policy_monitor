@@ -41,6 +41,12 @@ class Website(Base):
     title_selector_config: Mapped[str | None] = mapped_column(Text, nullable=True)
     content_selector_config: Mapped[str | None] = mapped_column(Text, nullable=True)
     content_area_selector_config: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_json_api: Mapped[bool] = mapped_column(Boolean, default=False)
+    api_list_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    api_title_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    api_url_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    api_url_template: Mapped[str | None] = mapped_column(Text, nullable=True)
+    api_detail_url_base: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     tasks: Mapped[List["MonitorTask"]] = relationship("MonitorTask", back_populates="website")
 

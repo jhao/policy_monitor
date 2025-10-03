@@ -15,6 +15,11 @@
     <input type="number" class="form-control" name="interval" min="1" value="{{ website.interval_minutes if website else 60 }}">
   </div>
 
+  <div class="form-check form-switch mb-4">
+    <input class="form-check-input" type="checkbox" name="is_json_api" id="isJsonApi" {% if website and website.is_json_api %}checked{% endif %}>
+    <label class="form-check-label" for="isJsonApi">使用 JSON API 列表数据</label>
+  </div>
+
   <div class="card border-0 shadow-sm mb-4">
     <div class="card-header bg-light fw-semibold">列表页配置</div>
     <div class="card-body">
@@ -24,6 +29,37 @@
         </label>
         <textarea class="form-control" name="content_area_selectors" rows="3" placeholder="例如：css=#main .article-list 或 xpath=//section[@data-type='policy']">{{ website.content_area_selector_config if website and website.content_area_selector_config else '' }}</textarea>
         <div class="form-text">每行一条规则，与标题和正文定位的写法一致，按顺序匹配第一个找到的区域。</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="jsonApiConfig" class="card border-0 shadow-sm mb-4{% if not (website and website.is_json_api) %} d-none{% endif %}">
+    <div class="card-header bg-light fw-semibold">JSON API 配置</div>
+    <div class="card-body">
+      <div class="mb-3">
+        <label class="form-label">数据列表路径</label>
+        <input type="text" class="form-control" name="api_list_path" placeholder="例如：data.items 或 records" value="{{ website.api_list_path if website and website.api_list_path else '' }}">
+        <div class="form-text">按点号分隔的路径，可使用如 <code>data.items[0]</code> 的下标访问，留空表示直接使用顶层数组。</div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">标题字段路径</label>
+        <input type="text" class="form-control" name="api_title_path" placeholder="例如：title 或 attributes.name" value="{{ website.api_title_path if website and website.api_title_path else '' }}">
+        <div class="form-text">用于提取子页面标题的字段路径，支持点号与下标语法，留空则默认使用拼接后的链接作为标题。</div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">URL 字段路径</label>
+        <input type="text" class="form-control" name="api_url_path" placeholder="例如：detailUrl 或 data.id" value="{{ website.api_url_path if website and website.api_url_path else '' }}">
+        <div class="form-text">当未配置 URL 模板时，系统将读取该字段作为链接地址。</div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">URL 模板</label>
+        <input type="text" class="form-control" name="api_url_template" placeholder="例如：https://example.com/detail/{id}" value="{{ website.api_url_template if website and website.api_url_template else '' }}">
+        <div class="form-text">可使用 <code>{字段路径}</code> 语法引用列表项字段，例如 <code>{data.id}</code>。若模板返回相对路径，将自动与下方基准地址或网站 URL 拼接。</div>
+      </div>
+      <div class="mb-0">
+        <label class="form-label">详情页基准地址</label>
+        <input type="text" class="form-control" name="api_detail_url_base" placeholder="例如：https://example.com/" value="{{ website.api_detail_url_base if website and website.api_detail_url_base else '' }}">
+        <div class="form-text">当生成的链接为相对路径时，将使用该地址作为基准；留空时默认使用网站 URL。</div>
       </div>
     </div>
   </div>
@@ -58,17 +94,30 @@
   document.addEventListener('DOMContentLoaded', function () {
     var fetchSubpagesCheckbox = document.getElementById('fetchSubpages');
     var detailSelectors = document.getElementById('detailSelectors');
+    var isJsonApiCheckbox = document.getElementById('isJsonApi');
+    var jsonApiConfig = document.getElementById('jsonApiConfig');
 
     function toggleDetailSelectors() {
-      if (fetchSubpagesCheckbox.checked) {
+      if (fetchSubpagesCheckbox.checked || isJsonApiCheckbox.checked) {
         detailSelectors.classList.remove('d-none');
       } else {
         detailSelectors.classList.add('d-none');
       }
     }
 
+    function toggleJsonApiConfig() {
+      if (isJsonApiCheckbox.checked) {
+        jsonApiConfig.classList.remove('d-none');
+      } else {
+        jsonApiConfig.classList.add('d-none');
+      }
+      toggleDetailSelectors();
+    }
+
     toggleDetailSelectors();
+    toggleJsonApiConfig();
     fetchSubpagesCheckbox.addEventListener('change', toggleDetailSelectors);
+    isJsonApiCheckbox.addEventListener('change', toggleJsonApiConfig);
   });
 </script>
 
