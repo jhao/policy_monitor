@@ -8,7 +8,12 @@ from typing import Any
 from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
 from sqlalchemy.orm import joinedload, selectinload
 
-from crawler import SIMILARITY_THRESHOLD, parse_snapshot, run_task
+from crawler import (
+    SIMILARITY_THRESHOLD,
+    parse_snapshot,
+    request_stop_task,
+    run_task,
+)
 from email_utils import (
     NotificationConfigError,
     send_dingtalk_message,
@@ -1072,6 +1077,33 @@ def run_task_now(task_id: int) -> Any:
         session.close()
 
 
+@app.route("/tasks/<int:task_id>/stop", methods=["POST"])
+def stop_task_execution(task_id: int) -> Any:
+    session = SessionLocal()
+    try:
+        task = session.get(MonitorTask, task_id)
+        if not task:
+            flash("未找到任务", "danger")
+            return redirect(url_for("list_tasks"))
+
+        running_log = (
+            session.query(CrawlLog)
+            .filter(CrawlLog.task_id == task_id, CrawlLog.status == "running")
+            .first()
+        )
+        if not running_log:
+            flash("任务当前未在执行", "info")
+            return redirect(url_for("view_task", task_id=task_id))
+
+        if request_stop_task(task_id):
+            flash("已发送停止请求，任务将很快终止", "success")
+        else:
+            flash("未找到正在执行的任务实例，可能已结束", "warning")
+        return redirect(url_for("view_task", task_id=task_id))
+    finally:
+        session.close()
+
+
 @app.route("/tasks/<int:task_id>/logs/<int:log_id>/entries")
 def stream_task_log_entries(task_id: int, log_id: int) -> Any:
     session = SessionLocal()
@@ -1263,6 +1295,7 @@ def list_results() -> Any:
         "success": "成功",
         "completed": "已完成",
         "failed": "失败",
+        "cancelled": "已终止",
     }
 
     return render_template(
