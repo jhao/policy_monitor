@@ -35,6 +35,7 @@ from nlp import similarity
 
 SIMILARITY_THRESHOLD = 0.6
 LOGGER = logging.getLogger(__name__)
+_PLAYWRIGHT_IMPORT_FAILED = False
 
 
 def _is_non_empty_text(value: str | None) -> bool:
@@ -222,6 +223,8 @@ def _fetch_html_with_requests(url: str) -> str:
 
 
 def fetch_html(url: str) -> str:
+    global _PLAYWRIGHT_IMPORT_FAILED
+
     try:
         from playwright.sync_api import (  # type: ignore import-not-found
             Error as PlaywrightError,
@@ -229,7 +232,9 @@ def fetch_html(url: str) -> str:
             sync_playwright,
         )
     except ImportError:
-        LOGGER.warning("Playwright 未安装，回退到 requests 抓取 %s", url)
+        if not _PLAYWRIGHT_IMPORT_FAILED:
+            LOGGER.info("Playwright 未安装，回退到 requests 抓取，后续请求将继续使用 requests")
+            _PLAYWRIGHT_IMPORT_FAILED = True
         return _fetch_html_with_requests(url)
 
     browser = None
