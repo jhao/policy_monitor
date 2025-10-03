@@ -23,12 +23,14 @@ from models import (
     MonitorTask,
     NotificationLog,
     NotificationSetting,
+    ProxyEndpoint,
     WatchContent,
     Website,
 )
 from scheduler import MonitorScheduler
 from logging_utils import configure_logging
 from time_utils import format_local_datetime, get_local_timezone, to_local
+from proxy_service import proxy_manager
 
 configure_logging()
 
@@ -95,6 +97,7 @@ def ensure_setup() -> None:
     if _setup_complete:
         return
     init_db()
+    proxy_manager.reload()
     scheduler.start()
     _setup_complete = True
 
@@ -1281,6 +1284,134 @@ def list_results() -> Any:
             "end_date": end_date,
         },
     )
+
+
+@app.route("/system/proxies")
+def list_proxy_endpoints() -> Any:
+    session = SessionLocal()
+    proxies = (
+        session.query(ProxyEndpoint)
+        .order_by(ProxyEndpoint.created_at.desc())
+        .all()
+    )
+    active_count = sum(1 for proxy in proxies if proxy.is_active and proxy.to_requests_mapping())
+    total_count = len(proxies)
+    return render_template(
+        "system/proxies/list.html",
+        proxies=proxies,
+        active_count=active_count,
+        total_count=total_count,
+    )
+
+
+def _extract_proxy_payload() -> tuple[str, str | None, str | None, str | None, str | None, bool]:
+    name = request.form.get("name", "").strip()
+    http_url = request.form.get("http_url", "").strip() or None
+    https_url = request.form.get("https_url", "").strip() or None
+    socks5_url = request.form.get("socks5_url", "").strip() or None
+    ftp_url = request.form.get("ftp_url", "").strip() or None
+    is_active = bool(request.form.get("is_active"))
+    return name, http_url, https_url, socks5_url, ftp_url, is_active
+
+
+def _validate_proxy_payload(name: str, *urls: str | None) -> bool:
+    if not name:
+        flash("请输入代理名称", "danger")
+        return False
+    if not any(url for url in urls):
+        flash("请至少填写一个代理地址", "danger")
+        return False
+    return True
+
+
+@app.route("/system/proxies/new", methods=["GET", "POST"])
+def create_proxy_endpoint() -> Any:
+    session = SessionLocal()
+    if request.method == "POST":
+        name, http_url, https_url, socks5_url, ftp_url, is_active = _extract_proxy_payload()
+        if _validate_proxy_payload(name, http_url, https_url, socks5_url, ftp_url):
+            proxy = ProxyEndpoint(
+                name=name,
+                http_url=http_url,
+                https_url=https_url,
+                socks5_url=socks5_url,
+                ftp_url=ftp_url,
+                is_active=is_active,
+            )
+            session.add(proxy)
+            try:
+                session.commit()
+            except Exception:  # noqa: BLE001
+                session.rollback()
+                flash("保存代理配置时发生错误，请检查名称是否重复", "danger")
+            else:
+                proxy_manager.reload()
+                flash("代理配置已创建", "success")
+                return redirect(url_for("list_proxy_endpoints"))
+    return render_template("system/proxies/form.html", proxy=None)
+
+
+@app.route("/system/proxies/<int:proxy_id>/edit", methods=["GET", "POST"])
+def edit_proxy_endpoint(proxy_id: int) -> Any:
+    session = SessionLocal()
+    proxy = session.get(ProxyEndpoint, proxy_id)
+    if not proxy:
+        flash("未找到代理配置", "danger")
+        return redirect(url_for("list_proxy_endpoints"))
+
+    if request.method == "POST":
+        name, http_url, https_url, socks5_url, ftp_url, is_active = _extract_proxy_payload()
+        if _validate_proxy_payload(name, http_url, https_url, socks5_url, ftp_url):
+            proxy.name = name
+            proxy.http_url = http_url
+            proxy.https_url = https_url
+            proxy.socks5_url = socks5_url
+            proxy.ftp_url = ftp_url
+            proxy.is_active = is_active
+            session.add(proxy)
+            try:
+                session.commit()
+            except Exception:  # noqa: BLE001
+                session.rollback()
+                flash("更新代理配置时发生错误，请检查名称是否重复", "danger")
+            else:
+                proxy_manager.reload()
+                flash("代理配置已更新", "success")
+                return redirect(url_for("list_proxy_endpoints"))
+
+    return render_template("system/proxies/form.html", proxy=proxy)
+
+
+@app.route("/system/proxies/<int:proxy_id>/toggle", methods=["POST"])
+def toggle_proxy_endpoint(proxy_id: int) -> Any:
+    session = SessionLocal()
+    proxy = session.get(ProxyEndpoint, proxy_id)
+    if not proxy:
+        flash("未找到代理配置", "danger")
+    else:
+        proxy.is_active = not proxy.is_active
+        session.add(proxy)
+        session.commit()
+        proxy_manager.reload()
+        flash(
+            "代理配置已启用" if proxy.is_active else "代理配置已停用",
+            "success",
+        )
+    return redirect(url_for("list_proxy_endpoints"))
+
+
+@app.route("/system/proxies/<int:proxy_id>/delete", methods=["POST"])
+def delete_proxy_endpoint(proxy_id: int) -> Any:
+    session = SessionLocal()
+    proxy = session.get(ProxyEndpoint, proxy_id)
+    if not proxy:
+        flash("未找到代理配置", "warning")
+    else:
+        session.delete(proxy)
+        session.commit()
+        proxy_manager.reload()
+        flash("代理配置已删除", "success")
+    return redirect(url_for("list_proxy_endpoints"))
 
 
 if __name__ == "__main__":

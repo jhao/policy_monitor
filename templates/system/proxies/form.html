@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-6">
+    <h2 class="mb-3">{{ '编辑代理配置' if proxy else '新增代理配置' }}</h2>
+    <form method="post" class="card">
+      <div class="card-body d-grid gap-3">
+        <div>
+          <label class="form-label">名称</label>
+          <input type="text" name="name" class="form-control" value="{{ proxy.name if proxy else '' }}" required>
+        </div>
+        <div>
+          <label class="form-label">HTTP 代理</label>
+          <input type="text" name="http_url" class="form-control" placeholder="例如：http://127.0.0.1:7890" value="{{ proxy.http_url if proxy else '' }}">
+        </div>
+        <div>
+          <label class="form-label">HTTPS 代理</label>
+          <input type="text" name="https_url" class="form-control" placeholder="例如：http://127.0.0.1:7890" value="{{ proxy.https_url if proxy else '' }}">
+        </div>
+        <div>
+          <label class="form-label">SOCKS5 代理</label>
+          <input type="text" name="socks5_url" class="form-control" placeholder="例如：socks5://127.0.0.1:1080" value="{{ proxy.socks5_url if proxy else '' }}">
+        </div>
+        <div>
+          <label class="form-label">FTP 代理</label>
+          <input type="text" name="ftp_url" class="form-control" value="{{ proxy.ftp_url if proxy else '' }}">
+          <div class="form-text">至少填写一个可用的代理地址。</div>
+        </div>
+        <div class="form-check form-switch">
+          <input class="form-check-input" type="checkbox" id="proxyActive" name="is_active" {% if proxy is none or proxy.is_active %}checked{% endif %}>
+          <label class="form-check-label" for="proxyActive">启用该代理</label>
+        </div>
+      </div>
+      <div class="card-footer d-flex justify-content-between">
+        <a href="{{ url_for('list_proxy_endpoints') }}" class="btn btn-outline-secondary">返回列表</a>
+        <button type="submit" class="btn btn-primary">保存</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
