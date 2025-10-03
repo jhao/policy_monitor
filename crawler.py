@@ -956,6 +956,13 @@ def run_task(task_id: int) -> None:
         add_detail("主页面抓取成功")
 
         area_selectors = _parse_selector_config(website.content_area_selector_config)
+        previous_effective_html = previous_main_html
+        if previous_main_html and area_selectors:
+            previous_region_html = _extract_region_html(previous_main_html, area_selectors)
+            if previous_region_html is not None:
+                previous_effective_html = previous_region_html
+            else:
+                add_detail("历史快照内容采集区域未匹配，使用整个页面", "warning")
         effective_main_html = _extract_region_html(new_html, area_selectors)
         if effective_main_html is None:
             effective_main_html = new_html
@@ -978,7 +985,7 @@ def run_task(task_id: int) -> None:
         subpage_snapshots: list[dict[str, str | None]] = []
 
         if website.fetch_subpages:
-            new_links = compare_links(previous_main_html, effective_main_html, website.url)
+            new_links = compare_links(previous_effective_html, effective_main_html, website.url)
             LOGGER.debug("Found %d new links", len(new_links))
             add_detail(f"发现新链接 {len(new_links)} 个")
 
