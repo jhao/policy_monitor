@@ -12,10 +12,11 @@
         <div class="navbar-nav">
           <a class="nav-link" href="{{ url_for('list_websites') }}">关注网站</a>
           <a class="nav-link" href="{{ url_for('list_contents') }}">关注内容</a>
-          <a class="nav-link" href="{{ url_for('list_tasks') }}">监控任务</a>
-          <a class="nav-link" href="{{ url_for('list_results') }}">监控记录</a>
-          <a class="nav-link" href="{{ url_for('manage_notifications') }}">通知配置</a>
-          <a class="nav-link" href="{{ url_for('list_proxy_endpoints') }}">系统管理</a>
+        <a class="nav-link" href="{{ url_for('list_tasks') }}">监控任务</a>
+        <a class="nav-link" href="{{ url_for('list_results') }}">监控记录</a>
+        <a class="nav-link" href="{{ url_for('manage_notifications') }}">通知配置</a>
+        <a class="nav-link" href="{{ url_for('list_proxy_endpoints') }}">系统管理</a>
+        <a class="nav-link" href="{{ url_for('cockpit_dashboard') }}">驾驶舱</a>
         </div>
       </div>
     </nav>

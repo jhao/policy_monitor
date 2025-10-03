@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
+from sqlalchemy import func
 from sqlalchemy.orm import joinedload, selectinload
 
 from crawler import (
@@ -24,6 +25,7 @@ from sqlalchemy.orm import Session
 from models import (
     ContentCategory,
     CrawlLog,
+    CrawlLogDetail,
     CrawlResult,
     MonitorTask,
     NotificationLog,
@@ -96,6 +98,13 @@ def record_notification_log(
     session.commit()
 
 
+def _serialize_datetime(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    localized = to_local(value)
+    return localized.strftime("%Y-%m-%d %H:%M:%S") if localized else value.isoformat()
+
+
 def ensure_setup() -> None:
     """Initialize database connections and start the scheduler once."""
     global _setup_complete
@@ -121,6 +130,135 @@ def shutdown_session(exception: Exception | None = None) -> None:  # noqa: ARG00
 def index() -> Any:
     return redirect(url_for("list_tasks"))
 
+
+@app.route("/cockpit")
+def cockpit_dashboard() -> Any:
+    return render_template("dashboard/cockpit.html")
+
+
+@app.route("/api/cockpit/overview")
+def cockpit_overview() -> Any:
+    session = SessionLocal()
+    try:
+        website_stats = (
+            session.query(
+                Website.id,
+                Website.name,
+                Website.url,
+                func.count(CrawlResult.id).label("result_count"),
+            )
+            .outerjoin(CrawlResult, CrawlResult.website_id == Website.id)
+            .group_by(Website.id)
+            .order_by(func.count(CrawlResult.id).desc(), Website.name)
+            .all()
+        )
+
+        total_results = sum(row.result_count for row in website_stats)
+        websites_payload = [
+            {
+                "id": row.id,
+                "name": row.name,
+                "url": row.url,
+                "result_count": row.result_count,
+                "share": (row.result_count / total_results) if total_results else 0,
+            }
+            for row in website_stats
+        ]
+
+        keyword_hot_sites = [
+            {"name": row.name, "result_count": row.result_count}
+            for row in website_stats
+            if row.result_count
+        ]
+
+        return jsonify({
+            "websites": websites_payload,
+            "keyword_hot_sites": keyword_hot_sites,
+            "updated_at": _serialize_datetime(datetime.utcnow()),
+        })
+    finally:
+        session.close()
+
+
+@app.route("/api/cockpit/tasks")
+def cockpit_tasks() -> Any:
+    session = SessionLocal()
+    try:
+        running_logs = (
+            session.query(CrawlLog)
+            .options(joinedload(CrawlLog.task).joinedload(MonitorTask.website))
+            .filter(CrawlLog.status == "running")
+            .order_by(CrawlLog.run_started_at.desc())
+            .limit(15)
+            .all()
+        )
+
+        payload = [
+            {
+                "task_id": log.task.id if log.task else None,
+                "task_name": log.task.name if log.task else "未知任务",
+                "website": log.task.website.name if log.task and log.task.website else None,
+                "started_at": _serialize_datetime(log.run_started_at),
+            }
+            for log in running_logs
+        ]
+        return jsonify({"running": payload})
+    finally:
+        session.close()
+
+
+@app.route("/api/cockpit/notifications")
+def cockpit_notifications() -> Any:
+    session = SessionLocal()
+    try:
+        logs = (
+            session.query(NotificationLog)
+            .options(joinedload(NotificationLog.task))
+            .order_by(NotificationLog.created_at.desc())
+            .limit(20)
+            .all()
+        )
+
+        payload = [
+            {
+                "channel": log.channel,
+                "status": log.status,
+                "target": log.target,
+                "message": log.message,
+                "created_at": _serialize_datetime(log.created_at),
+                "task_name": log.task.name if log.task else None,
+            }
+            for log in logs
+        ]
+        return jsonify({"items": payload})
+    finally:
+        session.close()
+
+
+@app.route("/api/cockpit/logs")
+def cockpit_logs() -> Any:
+    session = SessionLocal()
+    try:
+        entries = (
+            session.query(CrawlLogDetail)
+            .options(joinedload(CrawlLogDetail.log).joinedload(CrawlLog.task))
+            .order_by(CrawlLogDetail.created_at.desc())
+            .limit(80)
+            .all()
+        )
+
+        payload = [
+            {
+                "level": entry.level,
+                "message": entry.message,
+                "created_at": _serialize_datetime(entry.created_at),
+                "task_name": entry.log.task.name if entry.log and entry.log.task else None,
+            }
+            for entry in entries
+        ]
+        return jsonify({"entries": payload})
+    finally:
+        session.close()
 
 @app.route("/websites")
 def list_websites() -> Any:
