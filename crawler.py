@@ -36,6 +36,7 @@ from nlp import similarity
 SIMILARITY_THRESHOLD = 0.6
 LOGGER = logging.getLogger(__name__)
 _PLAYWRIGHT_IMPORT_FAILED = False
+_API_TEMPLATE_PATTERN = re.compile(r"\{\s*([^{}]+?)\s*\}")
 
 
 def _is_non_empty_text(value: str | None) -> bool:
@@ -121,6 +122,52 @@ def parse_snapshot(
                 "text": normalized_text or None,
             }
         )
+
+    if isinstance(data, dict) and data.get("mode") == "json_api":
+        api_raw = data.get("api_raw")
+        if isinstance(api_raw, str):
+            main_html = api_raw
+        else:
+            try:
+                main_html = json.dumps(api_raw, ensure_ascii=False, indent=2)
+            except TypeError:  # pragma: no cover - unexpected format
+                main_html = None
+        entries: list[dict[str, str | None]] = []
+        subpages_data = data.get("subpages")
+        if isinstance(subpages_data, list):
+            for item in subpages_data:
+                if isinstance(item, dict):
+                    _add_entry(
+                        entries,
+                        item.get("url"),
+                        item.get("html"),
+                        item.get("title"),
+                        item.get("text"),
+                    )
+        if not entries:
+            items_data = data.get("items", [])
+            for item in items_data:
+                if not isinstance(item, dict):
+                    continue
+                url = item.get("url") if isinstance(item.get("url"), str) else None
+                if not isinstance(url, str):
+                    continue
+                title = item.get("title") if isinstance(item.get("title"), str) else None
+                raw_data = item.get("raw")
+                html_repr: str | None = None
+                if isinstance(raw_data, str):
+                    html_repr = raw_data
+                elif raw_data is not None:
+                    try:
+                        html_repr = json.dumps(raw_data, ensure_ascii=False, indent=2)
+                    except TypeError:  # pragma: no cover - unexpected format
+                        html_repr = str(raw_data)
+                if html_repr is None:
+                    html_repr = json.dumps(item, ensure_ascii=False, indent=2)
+                _add_entry(entries, url, html_repr, title, None)
+        main_title = data.get("main_title") if isinstance(data.get("main_title"), str) else None
+        main_text = data.get("main_text") if isinstance(data.get("main_text"), str) else None
+        return main_html, entries, main_title, main_text
 
     if isinstance(data, dict) and ("main_html" in data or "subpages" in data):
         main_html = data.get("main_html") if isinstance(data.get("main_html"), str) else None
@@ -299,6 +346,17 @@ def fetch_html(url: str) -> str:
     except PlaywrightError as exc:
         LOGGER.warning("使用无头浏览器抓取 %s 失败：%s，改用 requests", url, exc)
         return _fetch_html_with_requests(url)
+
+
+def fetch_json_content(url: str) -> tuple[str, Any]:
+    """Fetch JSON payload from the given URL."""
+
+    text = _fetch_html_with_requests(url)
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:  # pragma: no cover - unexpected format
+        raise CrawlError(f"接口 {url} 返回的内容不是合法的 JSON：{exc}") from exc
+    return text, data
 
 
 def extract_links(html: str, base_url: str) -> List[str]:
@@ -577,6 +635,188 @@ def compare_links(old_html: str | None, new_html: str, base_url: str) -> List[st
         return list(current_links)
     previous_links = set(extract_links(old_html, base_url))
     return list(current_links - previous_links)
+
+
+def _split_json_path(path: str) -> list[str | int]:
+    tokens: list[str | int] = []
+    if not path:
+        return tokens
+    for segment in path.split("."):
+        if not segment:
+            continue
+        buffer: list[str] = []
+        index = 0
+        length = len(segment)
+        while index < length:
+            char = segment[index]
+            if char == "[":
+                if buffer:
+                    tokens.append("".join(buffer))
+                    buffer = []
+                end = segment.find("]", index)
+                if end == -1:
+                    return []
+                raw_index = segment[index + 1 : end].strip()
+                if not raw_index.isdigit():
+                    return []
+                tokens.append(int(raw_index))
+                index = end + 1
+            else:
+                buffer.append(char)
+                index += 1
+        if buffer:
+            tokens.append("".join(buffer))
+    return tokens
+
+
+def _lookup_json_path(data: Any, path: str) -> Any:
+    if not path:
+        return data
+    tokens = _split_json_path(path)
+    if not tokens and path:
+        return None
+    current: Any = data
+    for token in tokens:
+        if isinstance(token, int):
+            if isinstance(current, list) and 0 <= token < len(current):
+                current = current[token]
+            else:
+                return None
+        else:
+            if isinstance(current, dict) and token in current:
+                current = current[token]
+            else:
+                return None
+    return current
+
+
+def _render_api_template(template: str, item: Any, base_url: str) -> str:
+    def _replace(match: re.Match[str]) -> str:
+        key = match.group(1).strip()
+        if not key:
+            return ""
+        if key == "base_url":
+            value: Any = base_url
+        else:
+            value = _lookup_json_path(item, key)
+        if value is None:
+            return ""
+        if isinstance(value, (dict, list)):
+            try:
+                return json.dumps(value, ensure_ascii=False)
+            except TypeError:  # pragma: no cover - extremely rare
+                return ""
+        return str(value)
+
+    return _API_TEMPLATE_PATTERN.sub(_replace, template)
+
+
+def _normalize_api_title(value: Any, fallback: str) -> str:
+    if value is None:
+        return fallback
+    if isinstance(value, str):
+        text = value.strip()
+        return text or fallback
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, (dict, list)):
+        try:
+            return json.dumps(value, ensure_ascii=False)
+        except TypeError:  # pragma: no cover - extremely rare
+            return fallback
+    return str(value).strip() or fallback
+
+
+def _build_api_item_url(item: Any, website: Website) -> str | None:
+    base_url = website.api_detail_url_base or website.url
+    url_value = ""
+    if website.api_url_template:
+        url_value = _render_api_template(website.api_url_template, item, base_url).strip()
+    if not url_value and website.api_url_path:
+        raw_value = _lookup_json_path(item, website.api_url_path)
+        if raw_value is None:
+            url_value = ""
+        elif isinstance(raw_value, (dict, list)):
+            try:
+                url_value = json.dumps(raw_value, ensure_ascii=False)
+            except TypeError:  # pragma: no cover - extremely rare
+                url_value = ""
+        else:
+            url_value = str(raw_value)
+        url_value = url_value.strip()
+    if not url_value:
+        return None
+    if url_value.startswith(("http://", "https://")):
+        return url_value
+    return urljoin(base_url, url_value)
+
+
+def _collect_api_items(data_list: list[Any], website: Website) -> tuple[list[dict[str, Any]], list[str]]:
+    items: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    seen_urls: set[str] = set()
+    for index, entry in enumerate(data_list):
+        if not isinstance(entry, dict):
+            warnings.append(f"第 {index + 1} 条记录不是对象，已跳过")
+            continue
+        url = _build_api_item_url(entry, website)
+        if not url:
+            warnings.append(f"第 {index + 1} 条记录未找到有效的链接，已跳过")
+            continue
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+        title_source = _lookup_json_path(entry, website.api_title_path or "") if website.api_title_path else None
+        title = _normalize_api_title(title_source, url)
+        items.append({"url": url, "title": title, "raw": entry})
+    return items, warnings
+
+
+def _load_previous_api_urls(snapshot: str | None) -> set[str]:
+    if not snapshot:
+        return set()
+    try:
+        payload = json.loads(snapshot)
+    except json.JSONDecodeError:
+        return set()
+    if isinstance(payload, dict) and payload.get("mode") == "json_api":
+        urls = {
+            item.get("url")
+            for item in payload.get("items", [])
+            if isinstance(item, dict) and isinstance(item.get("url"), str)
+        }
+        return {url for url in urls if url}
+    return set()
+
+
+def build_json_api_snapshot(
+    api_raw: str,
+    items: list[dict[str, Any]],
+    detail_snapshots: list[dict[str, str | None]] | None = None,
+) -> str:
+    serialized_items: list[dict[str, Any]] = []
+    for item in items:
+        url = item.get("url")
+        if not isinstance(url, str):
+            continue
+        entry: dict[str, Any] = {"url": url}
+        title = item.get("title")
+        if isinstance(title, str) and title.strip():
+            entry["title"] = title.strip()
+        raw_data = item.get("raw")
+        if raw_data is not None:
+            entry["raw"] = raw_data
+        serialized_items.append(entry)
+
+    payload: dict[str, Any] = {
+        "mode": "json_api",
+        "version": 1,
+        "api_raw": api_raw,
+        "items": serialized_items,
+    }
+    if detail_snapshots:
+        payload["subpages"] = detail_snapshots
+    return json.dumps(payload, ensure_ascii=False)
 
 
 KEYWORD_SPLIT_PATTERN = re.compile(r"[,\u3001，;；、\s]+")
@@ -951,52 +1191,56 @@ def run_task(task_id: int) -> None:
 
         add_detail(f"准备抓取网站：{website.url}")
         LOGGER.info("Running task %s on %s", task.name, website.url)
-        previous_main_html, _, _, previous_main_text = parse_snapshot(website.last_snapshot)
-        new_html = fetch_html(website.url)
-        add_detail("主页面抓取成功")
-
-        area_selectors = _parse_selector_config(website.content_area_selector_config)
-        previous_effective_html = previous_main_html
-        if previous_main_html and area_selectors:
-            previous_region_html = _extract_region_html(previous_main_html, area_selectors)
-            if previous_region_html is not None:
-                previous_effective_html = previous_region_html
-            else:
-                add_detail("历史快照内容采集区域未匹配，使用整个页面", "warning")
-        effective_main_html = _extract_region_html(new_html, area_selectors)
-        if effective_main_html is None:
-            effective_main_html = new_html
-            if area_selectors:
-                add_detail("内容采集区域定位未匹配，使用整个页面", "warning")
-        elif area_selectors:
-            add_detail("已应用内容采集区域定位，仅分析匹配区域")
-
-        main_title, main_summary = summarize_html(effective_main_html, website)
-        current_main_text = extract_body_text(effective_main_html)
-        LOGGER.info("Task %s fetched main page title: %s", task.name, main_title or "<无标题>")
-        if main_title:
-            add_detail(f"主页面标题：{main_title}")
-        else:
-            add_detail("主页面未发现标题", "warning")
         matched_results: list[dict[str, Any]] = []
-
         subpage_errors: list[str] = []
-
         subpage_snapshots: list[dict[str, str | None]] = []
+        snapshot_payload: str | None = None
 
-        if website.fetch_subpages:
-            new_links = compare_links(previous_effective_html, effective_main_html, website.url)
-            LOGGER.debug("Found %d new links", len(new_links))
-            add_detail(f"发现新链接 {len(new_links)} 个")
-
-            for link in new_links:
-                add_detail(f"抓取子链接：{link}")
+        if website.is_json_api:
+            add_detail("以 JSON API 模式抓取")
+            api_text, api_data = fetch_json_content(website.url)
+            add_detail("接口响应获取成功")
+            list_source: Any = api_data
+            if website.api_list_path:
+                list_source = _lookup_json_path(api_data, website.api_list_path)
+                if list_source is None:
+                    raise CrawlError(
+                        f"无法在 JSON 数据中找到路径 {website.api_list_path} 对应的数组"
+                    )
+            if isinstance(list_source, list):
+                data_list = list_source
+            elif isinstance(list_source, tuple):
+                data_list = list(list_source)
+            else:
+                raise CrawlError(
+                    f"JSON API 数据列表路径 {website.api_list_path or '<根>'} 未返回数组"
+                )
+            add_detail(f"解析数据列表成功，共 {len(data_list)} 条")
+            items, warnings = _collect_api_items(data_list, website)
+            for message in warnings:
+                add_detail(message, "warning")
+            if items:
+                add_detail(f"有效链接 {len(items)} 条")
+            else:
+                add_detail("未在数据列表中找到有效的链接", "warning")
+            previous_urls = _load_previous_api_urls(website.last_snapshot)
+            if previous_urls:
+                add_detail(f"历史记录包含 {len(previous_urls)} 条链接")
+            new_items = [item for item in items if item["url"] not in previous_urls]
+            if new_items:
+                add_detail(f"发现新链接 {len(new_items)} 个")
+            else:
+                add_detail("未发现新的链接")
+            area_selectors = _parse_selector_config(website.content_area_selector_config)
+            for item in new_items:
+                link = item["url"]
+                add_detail(f"抓取详情页：{link}")
                 try:
                     link_html_full = fetch_html(link)
-                    add_detail(f"子链接抓取成功：{link}")
+                    add_detail(f"详情页抓取成功：{link}")
                     link_area_html = _extract_region_html(link_html_full, area_selectors)
                     if area_selectors and link_area_html is None:
-                        add_detail(f"子链接内容采集区域未匹配：{link}", "warning")
+                        add_detail(f"详情页内容采集区域未匹配：{link}", "warning")
                     link_html = link_area_html or link_html_full
                     subpage_snapshots.append(
                         {
@@ -1006,28 +1250,35 @@ def run_task(task_id: int) -> None:
                         }
                     )
                 except Exception:  # noqa: BLE001
-                    LOGGER.exception("Failed to fetch sub link %s", link)
-                    add_detail(f"子链接抓取失败：{link}", "warning")
+                    LOGGER.exception("Failed to fetch API detail %s", link)
+                    add_detail(f"详情页抓取失败：{link}", "warning")
                     subpage_errors.append(link)
                     continue
                 title, summary = summarize_html(link_html, website)
+                if not _is_non_empty_text(title):
+                    title = item["title"]
                 LOGGER.info(
-                    "Task %s fetched sub page %s title: %s",
+                    "Task %s fetched API detail %s title: %s",
                     task.name,
                     link,
                     title or "<无标题>",
                 )
                 if title:
-                    add_detail(f"子链接标题：{title}")
+                    add_detail(f"详情页标题：{title}")
                 else:
-                    add_detail("子链接未发现标题", "warning")
+                    add_detail("详情页未发现标题", "warning")
                 subpage_snapshots[-1]["title"] = title
-                # 关键关注内容仅匹配子页面标题
                 scores = score_contents(title, title, task.watch_contents)
-                matches = [(content, score) for content, score in scores if score >= SIMILARITY_THRESHOLD]
+                matches = [
+                    (content, score)
+                    for content, score in scores
+                    if score >= SIMILARITY_THRESHOLD
+                ]
                 if matches:
-                    matched_contents = ", ".join(f"{content.text}({score:.2f})" for content, score in matches)
-                    add_detail(f"子链接命中关注项：{matched_contents}", "success")
+                    matched_contents = ", ".join(
+                        f"{content.text}({score:.2f})" for content, score in matches
+                    )
+                    add_detail(f"详情页命中关注项：{matched_contents}", "success")
                     best_match = max(matches, key=lambda item: item[1])
                     result = CrawlResult(
                         task=task,
@@ -1049,47 +1300,156 @@ def run_task(task_id: int) -> None:
                             "base_url": link,
                         }
                     )
+            snapshot_payload = build_json_api_snapshot(api_text, items, subpage_snapshots)
         else:
-            previous_text_to_compare = previous_main_text
-            if not _is_non_empty_text(previous_text_to_compare) and isinstance(previous_main_html, str):
-                previous_text_to_compare = extract_body_text(previous_main_html)
-            has_changed = (previous_text_to_compare or "") != current_main_text
-            add_detail("检测到页面发生变化" if has_changed else "页面内容无变化")
-            if has_changed:
-                title, summary = main_title, main_summary
-                scores = score_contents(title, summary, task.watch_contents)
-                matches = [(content, score) for content, score in scores if score >= SIMILARITY_THRESHOLD]
-                if matches:
-                    matched_contents = ", ".join(f"{content.text}({score:.2f})" for content, score in matches)
-                    add_detail(f"主页面命中关注项：{matched_contents}", "success")
-                    best_match = max(matches, key=lambda item: item[1])
-                    result = CrawlResult(
-                        task=task,
-                        website=website,
-                        content=best_match[0],
-                        discovered_url=website.url,
-                        link_title=title,
-                        content_summary=summary,
-                        similarity_score=best_match[1],
+            previous_main_html, _, _, previous_main_text = parse_snapshot(website.last_snapshot)
+            new_html = fetch_html(website.url)
+            add_detail("主页面抓取成功")
+
+            area_selectors = _parse_selector_config(website.content_area_selector_config)
+            previous_effective_html = previous_main_html
+            if previous_main_html and area_selectors:
+                previous_region_html = _extract_region_html(previous_main_html, area_selectors)
+                if previous_region_html is not None:
+                    previous_effective_html = previous_region_html
+                else:
+                    add_detail("历史快照内容采集区域未匹配，使用整个页面", "warning")
+            effective_main_html = _extract_region_html(new_html, area_selectors)
+            if effective_main_html is None:
+                effective_main_html = new_html
+                if area_selectors:
+                    add_detail("内容采集区域定位未匹配，使用整个页面", "warning")
+            elif area_selectors:
+                add_detail("已应用内容采集区域定位，仅分析匹配区域")
+
+            main_title, main_summary = summarize_html(effective_main_html, website)
+            current_main_text = extract_body_text(effective_main_html)
+            LOGGER.info("Task %s fetched main page title: %s", task.name, main_title or "<无标题>")
+            if main_title:
+                add_detail(f"主页面标题：{main_title}")
+            else:
+                add_detail("主页面未发现标题", "warning")
+
+            if website.fetch_subpages:
+                new_links = compare_links(previous_effective_html, effective_main_html, website.url)
+                LOGGER.debug("Found %d new links", len(new_links))
+                add_detail(f"发现新链接 {len(new_links)} 个")
+
+                for link in new_links:
+                    add_detail(f"抓取子链接：{link}")
+                    try:
+                        link_html_full = fetch_html(link)
+                        add_detail(f"子链接抓取成功：{link}")
+                        link_area_html = _extract_region_html(link_html_full, area_selectors)
+                        if area_selectors and link_area_html is None:
+                            add_detail(f"子链接内容采集区域未匹配：{link}", "warning")
+                        link_html = link_area_html or link_html_full
+                        subpage_snapshots.append(
+                            {
+                                "url": link,
+                                "html": link_html,
+                                "text": extract_body_text(link_html),
+                            }
+                        )
+                    except Exception:  # noqa: BLE001
+                        LOGGER.exception("Failed to fetch sub link %s", link)
+                        add_detail(f"子链接抓取失败：{link}", "warning")
+                        subpage_errors.append(link)
+                        continue
+                    title, summary = summarize_html(link_html, website)
+                    LOGGER.info(
+                        "Task %s fetched sub page %s title: %s",
+                        task.name,
+                        link,
+                        title or "<无标题>",
                     )
-                    session.add(result)
-                    matched_results.append(
-                        {
-                            "title": title or website.url,
-                            "url": website.url,
-                            "summary": summary or "",
-                            "matches": matches,
-                            "html": effective_main_html,
-                            "base_url": website.url,
-                        }
-                    )
+                    if title:
+                        add_detail(f"子链接标题：{title}")
+                    else:
+                        add_detail("子链接未发现标题", "warning")
+                    subpage_snapshots[-1]["title"] = title
+                    scores = score_contents(title, title, task.watch_contents)
+                    matches = [
+                        (content, score)
+                        for content, score in scores
+                        if score >= SIMILARITY_THRESHOLD
+                    ]
+                    if matches:
+                        matched_contents = ", ".join(
+                            f"{content.text}({score:.2f})" for content, score in matches
+                        )
+                        add_detail(f"子链接命中关注项：{matched_contents}", "success")
+                        best_match = max(matches, key=lambda item: item[1])
+                        result = CrawlResult(
+                            task=task,
+                            website=website,
+                            content=best_match[0],
+                            discovered_url=link,
+                            link_title=title,
+                            content_summary=summary,
+                            similarity_score=best_match[1],
+                        )
+                        session.add(result)
+                        matched_results.append(
+                            {
+                                "title": title or link,
+                                "url": link,
+                                "summary": summary or "",
+                                "matches": matches,
+                                "html": link_html,
+                                "base_url": link,
+                            }
+                        )
+            else:
+                previous_text_to_compare = previous_main_text
+                if not _is_non_empty_text(previous_text_to_compare) and isinstance(previous_main_html, str):
+                    previous_text_to_compare = extract_body_text(previous_main_html)
+                has_changed = (previous_text_to_compare or "") != current_main_text
+                add_detail("检测到页面发生变化" if has_changed else "页面内容无变化")
+                if has_changed:
+                    title, summary = main_title, main_summary
+                    scores = score_contents(title, summary, task.watch_contents)
+                    matches = [
+                        (content, score)
+                        for content, score in scores
+                        if score >= SIMILARITY_THRESHOLD
+                    ]
+                    if matches:
+                        matched_contents = ", ".join(
+                            f"{content.text}({score:.2f})" for content, score in matches
+                        )
+                        add_detail(f"主页面命中关注项：{matched_contents}", "success")
+                        best_match = max(matches, key=lambda item: item[1])
+                        result = CrawlResult(
+                            task=task,
+                            website=website,
+                            content=best_match[0],
+                            discovered_url=website.url,
+                            link_title=title,
+                            content_summary=summary,
+                            similarity_score=best_match[1],
+                        )
+                        session.add(result)
+                        matched_results.append(
+                            {
+                                "title": title or website.url,
+                                "url": website.url,
+                                "summary": summary or "",
+                                "matches": matches,
+                                "html": effective_main_html,
+                                "base_url": website.url,
+                            }
+                        )
+
+            snapshot_payload = build_snapshot(effective_main_html, subpage_snapshots, main_title)
 
         if matched_results:
             add_detail(f"发现匹配结果 {len(matched_results)} 条", "success")
         else:
             add_detail("未发现符合条件的内容")
 
-        website.last_snapshot = build_snapshot(effective_main_html, subpage_snapshots, main_title)
+        if snapshot_payload is not None:
+            website.last_snapshot = snapshot_payload
         website.last_fetched_at = datetime.utcnow()
         task.last_run_at = datetime.utcnow()
         task.last_status = "success" if matched_results else "completed"

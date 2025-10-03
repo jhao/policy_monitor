@@ -203,6 +203,12 @@ def create_website() -> Any:
         title_selectors = request.form.get("title_selectors", "").strip()
         content_selectors = request.form.get("content_selectors", "").strip()
         content_area_selectors = request.form.get("content_area_selectors", "").strip()
+        is_json_api = bool(request.form.get("is_json_api"))
+        api_list_path = request.form.get("api_list_path", "").strip()
+        api_title_path = request.form.get("api_title_path", "").strip()
+        api_url_path = request.form.get("api_url_path", "").strip()
+        api_url_template = request.form.get("api_url_template", "").strip()
+        api_detail_url_base = request.form.get("api_detail_url_base", "").strip()
         if not name or not url:
             flash("请输入网站名称和URL", "danger")
         else:
@@ -214,6 +220,12 @@ def create_website() -> Any:
                 title_selector_config=title_selectors or None,
                 content_selector_config=content_selectors or None,
                 content_area_selector_config=content_area_selectors or None,
+                is_json_api=is_json_api,
+                api_list_path=api_list_path or None,
+                api_title_path=api_title_path or None,
+                api_url_path=api_url_path or None,
+                api_url_template=api_url_template or None,
+                api_detail_url_base=api_detail_url_base or None,
             )
             session.add(website)
             session.commit()
@@ -243,6 +255,12 @@ def edit_website(website_id: int) -> Any:
         website.content_area_selector_config = (
             request.form.get("content_area_selectors", "").strip() or None
         )
+        website.is_json_api = bool(request.form.get("is_json_api"))
+        website.api_list_path = request.form.get("api_list_path", "").strip() or None
+        website.api_title_path = request.form.get("api_title_path", "").strip() or None
+        website.api_url_path = request.form.get("api_url_path", "").strip() or None
+        website.api_url_template = request.form.get("api_url_template", "").strip() or None
+        website.api_detail_url_base = request.form.get("api_detail_url_base", "").strip() or None
         session.add(website)
         session.commit()
         flash("网站信息已更新", "success")

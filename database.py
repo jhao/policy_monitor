@@ -35,6 +35,30 @@ def init_db() -> None:
             connection.exec_driver_sql(
                 "ALTER TABLE websites ADD COLUMN content_area_selector_config TEXT"
             )
+        if "is_json_api" not in existing_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE websites ADD COLUMN is_json_api BOOLEAN DEFAULT 0"
+            )
+        if "api_list_path" not in existing_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE websites ADD COLUMN api_list_path TEXT"
+            )
+        if "api_title_path" not in existing_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE websites ADD COLUMN api_title_path TEXT"
+            )
+        if "api_url_path" not in existing_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE websites ADD COLUMN api_url_path TEXT"
+            )
+        if "api_url_template" not in existing_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE websites ADD COLUMN api_url_template TEXT"
+            )
+        if "api_detail_url_base" not in existing_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE websites ADD COLUMN api_detail_url_base TEXT"
+            )
 
         notification_columns = {
             row[1]

@@ -10,6 +10,7 @@
     <tr>
       <th>名称</th>
       <th>URL</th>
+      <th>来源类型</th>
       <th>抓取子页面</th>
       <th>时间间隔(分钟)</th>
       <th>最后抓取时间</th>
@@ -26,6 +27,7 @@
       <td>
         <a href="{{ website.url }}" target="_blank" rel="noopener noreferrer">访问网站</a>
       </td>
+      <td>{{ 'JSON API' if website.is_json_api else '网页' }}</td>
       <td>{{ '是' if website.fetch_subpages else '否' }}</td>
       <td>{{ website.interval_minutes }}</td>
       <td>{{ website.last_fetched_at or '尚未抓取' }}</td>
