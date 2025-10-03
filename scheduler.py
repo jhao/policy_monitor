@@ -50,13 +50,17 @@ class MonitorScheduler:
                 .all()
             )
             now = datetime.utcnow()
+            scheduled_task_ids: list[int] = []
             for task in tasks:
                 website = task.website
                 if not website:
                     continue
                 interval = timedelta(minutes=website.interval_minutes or 60)
                 if not task.last_run_at or now - task.last_run_at >= interval:
-                    LOGGER.info("Scheduling task %s", task.id)
-                    run_task(task.id)
+                    scheduled_task_ids.append(task.id)
         finally:
             session.close()
+
+        for task_id in scheduled_task_ids:
+            LOGGER.info("Scheduling task %s", task_id)
+            run_task(task_id)
