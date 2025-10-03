@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import threading
+import time
 from collections import Counter, OrderedDict
 from datetime import datetime
 from html import escape as html_escape
@@ -43,6 +44,8 @@ _API_TEMPLATE_PATTERN = re.compile(r"\{\s*([^{}]+?)\s*\}")
 
 _RUNNING_TASKS: dict[int, threading.Event] = {}
 _RUNNING_TASKS_LOCK = threading.Lock()
+_REQUEST_THROTTLE_LOCK = threading.Lock()
+_LAST_REQUEST_AT: dict[object, float] = {}
 
 
 class TaskCancelledError(RuntimeError):
@@ -326,12 +329,53 @@ def _build_browser_like_headers(url: str) -> dict[str, str]:
     return headers
 
 
-def _fetch_html_with_requests(url: str, *, overrides: dict[str, str] | None = None) -> str:
+def _build_request_options(website: Website | None) -> dict[str, Any]:
+    if website is None:
+        return {
+            "use_proxy": True,
+            "forced_user_agent": None,
+            "request_interval": 0.0,
+            "throttle_key": None,
+        }
+
+    use_proxy = bool(website.use_proxy)
+    forced_user_agent = None
+    request_interval = 0.0
+    throttle_key: object | None = None
+
+    if use_proxy:
+        user_agent = (website.proxy_user_agent or "").strip()
+        forced_user_agent = user_agent or None
+        interval_raw = website.proxy_request_interval or 0
+        request_interval = float(max(0, interval_raw))
+        throttle_key = website.id or website.url
+
+    return {
+        "use_proxy": use_proxy,
+        "forced_user_agent": forced_user_agent,
+        "request_interval": request_interval,
+        "throttle_key": throttle_key,
+    }
+
+
+def _fetch_html_with_requests(
+    url: str,
+    *,
+    overrides: dict[str, str] | None = None,
+    use_proxy: bool = True,
+    forced_user_agent: str | None = None,
+    request_interval: float = 0.0,
+    throttle_key: object | None = None,
+) -> str:
     profile_headers = get_profile_headers(url)
+    if forced_user_agent:
+        profile_headers["User-Agent"] = forced_user_agent
     headers_sequence = []
     for base_headers in (DEFAULT_REQUEST_HEADERS, _build_browser_like_headers(url)):
         headers = base_headers.copy()
         headers.update(profile_headers)
+        if forced_user_agent:
+            headers["User-Agent"] = forced_user_agent
         if overrides:
             headers.update(overrides)
         headers_sequence.append(headers)
@@ -344,19 +388,33 @@ def _fetch_html_with_requests(url: str, *, overrides: dict[str, str] | None = No
     while attempt < len(headers_sequence):
         headers = headers_sequence[attempt]
         attempt += 1
-        proxies = proxy_manager.get_next_proxy()
+        wait_time = 0.0
+        if request_interval > 0:
+            if throttle_key is not None:
+                now = time.monotonic()
+                with _REQUEST_THROTTLE_LOCK:
+                    last_request = _LAST_REQUEST_AT.get(throttle_key)
+                if last_request is not None:
+                    wait_time = max(0.0, request_interval - (now - last_request))
+            if wait_time > 0:
+                LOGGER.debug("等待 %.2f 秒后请求 %s", wait_time, url)
+                time.sleep(wait_time)
+        proxies = proxy_manager.get_next_proxy() if use_proxy else None
         if proxies:
             LOGGER.debug(
                 "使用代理请求 %s，代理类型: %s",
                 url,
                 ",".join(sorted(proxies.keys())),
             )
+        status_timestamp = time.monotonic()
         try:
             response = requests.get(url, timeout=20, headers=headers, proxies=proxies)
             response.raise_for_status()
+            status_timestamp = time.monotonic()
             break
         except requests.HTTPError as exc:
-            status = response.status_code
+            status_timestamp = time.monotonic()
+            status = response.status_code if response is not None else exc.response.status_code if exc.response else None
             if status == 403 and attempt < len(headers_sequence):
                 LOGGER.info("请求 %s 返回 403，尝试使用更接近浏览器的请求头重试", url)
                 continue
@@ -376,21 +434,29 @@ def _fetch_html_with_requests(url: str, *, overrides: dict[str, str] | None = No
                 ajax_retry_added = True
                 LOGGER.info("请求 %s 返回 418，尝试补充 AJAX 相关请求头后重试", url)
                 continue
-            message = f"请求 {url} 失败，状态码 {status}"
-            if status == 403:
-                message += "，可能需要浏览器访问或额外的身份验证"
-            if status == 418:
-                message += "，可能被目标站点的反爬虫策略拦截"
+            message = f"请求 {url} 失败"
+            if status is not None:
+                message += f"，状态码 {status}"
+                if status == 403:
+                    message += "，可能被目标网站识别为异常访问"
             raise CrawlError(message) from exc
         except requests.RequestException as exc:
+            status_timestamp = time.monotonic()
             LOGGER.warning("请求 %s 出现网络错误: %s", url, exc)
             if attempt < len(headers_sequence):
                 continue
             raise CrawlError(f"请求 {url} 失败：{exc}") from exc
+        finally:
+            if request_interval > 0 and throttle_key is not None:
+                with _REQUEST_THROTTLE_LOCK:
+                    _LAST_REQUEST_AT[throttle_key] = status_timestamp
     else:  # pragma: no cover - 保底分支
         raise CrawlError(f"无法成功请求 {url}")
 
     assert response is not None  # for type checkers
+    if request_interval > 0 and throttle_key is not None:
+        with _REQUEST_THROTTLE_LOCK:
+            _LAST_REQUEST_AT[throttle_key] = time.monotonic()
     if not response.encoding or response.encoding.lower() == "iso-8859-1":
         apparent = response.apparent_encoding
         if apparent:
@@ -398,8 +464,12 @@ def _fetch_html_with_requests(url: str, *, overrides: dict[str, str] | None = No
     return response.text
 
 
-def fetch_html(url: str) -> str:
+def fetch_html(url: str, website: Website | None = None) -> str:
     global _PLAYWRIGHT_IMPORT_FAILED
+
+    request_options = _build_request_options(website)
+    if website is not None and request_options["use_proxy"]:
+        return _fetch_html_with_requests(url, **request_options)
 
     try:
         from playwright.sync_api import (  # type: ignore import-not-found
@@ -411,7 +481,7 @@ def fetch_html(url: str) -> str:
         if not _PLAYWRIGHT_IMPORT_FAILED:
             LOGGER.info("Playwright 未安装，回退到 requests 抓取，后续请求将继续使用 requests")
             _PLAYWRIGHT_IMPORT_FAILED = True
-        return _fetch_html_with_requests(url)
+        return _fetch_html_with_requests(url, **request_options)
 
     browser = None
     context = None
@@ -440,16 +510,21 @@ def fetch_html(url: str) -> str:
                     browser.close()
     except PlaywrightTimeoutError as exc:
         LOGGER.warning("使用无头浏览器抓取 %s 超时：%s，改用 requests", url, exc)
-        return _fetch_html_with_requests(url)
+        return _fetch_html_with_requests(url, **request_options)
     except PlaywrightError as exc:
         LOGGER.warning("使用无头浏览器抓取 %s 失败：%s，改用 requests", url, exc)
-        return _fetch_html_with_requests(url)
+        return _fetch_html_with_requests(url, **request_options)
 
 
-def fetch_json_content(url: str) -> tuple[str, Any]:
+def fetch_json_content(url: str, website: Website | None = None) -> tuple[str, Any]:
     """Fetch JSON payload from the given URL."""
 
-    text = _fetch_html_with_requests(url, overrides=JSON_API_REQUEST_OVERRIDES)
+    request_options = _build_request_options(website)
+    text = _fetch_html_with_requests(
+        url,
+        overrides=JSON_API_REQUEST_OVERRIDES,
+        **request_options,
+    )
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:  # pragma: no cover - unexpected format
@@ -1313,7 +1388,7 @@ def run_task(task_id: int) -> None:
         if website.is_json_api:
             ensure_not_cancelled()
             add_detail("以 JSON API 模式抓取")
-            api_text, api_data = fetch_json_content(website.url)
+            api_text, api_data = fetch_json_content(website.url, website)
             add_detail("接口响应获取成功")
             list_source: Any = api_data
             if website.api_list_path:
@@ -1353,7 +1428,7 @@ def run_task(task_id: int) -> None:
                 add_detail(f"抓取详情页：{link}")
                 try:
                     ensure_not_cancelled()
-                    link_html_full = fetch_html(link)
+                    link_html_full = fetch_html(link, website)
                     add_detail(f"详情页抓取成功：{link}")
                     link_area_html = _extract_region_html(link_html_full, area_selectors)
                     if area_selectors and link_area_html is None:
@@ -1421,7 +1496,7 @@ def run_task(task_id: int) -> None:
         else:
             previous_main_html, _, _, previous_main_text = parse_snapshot(website.last_snapshot)
             ensure_not_cancelled()
-            new_html = fetch_html(website.url)
+            new_html = fetch_html(website.url, website)
             add_detail("主页面抓取成功")
 
             area_selectors = _parse_selector_config(website.content_area_selector_config)
@@ -1458,7 +1533,7 @@ def run_task(task_id: int) -> None:
                     add_detail(f"抓取子链接：{link}")
                     try:
                         ensure_not_cancelled()
-                        link_html_full = fetch_html(link)
+                        link_html_full = fetch_html(link, website)
                         add_detail(f"子链接抓取成功：{link}")
                         link_area_html = _extract_region_html(link_html_full, area_selectors)
                         if area_selectors and link_area_html is None:

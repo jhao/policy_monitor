@@ -13,6 +13,8 @@
       <th>来源类型</th>
       <th>抓取子页面</th>
       <th>时间间隔(分钟)</th>
+      <th>使用代理</th>
+      <th>请求间隔(秒)</th>
       <th>最后抓取时间</th>
       <th>内容区域定位</th>
       <th>标题定位</th>
@@ -30,6 +32,8 @@
       <td>{{ 'JSON API' if website.is_json_api else '网页' }}</td>
       <td>{{ '是' if website.fetch_subpages else '否' }}</td>
       <td>{{ website.interval_minutes }}</td>
+      <td>{{ '是' if website.use_proxy else '否' }}</td>
+      <td>{{ website.proxy_request_interval or 0 }}</td>
       <td>{{ website.last_fetched_at or '尚未抓取' }}</td>
       <td class="text-nowrap">
         {% if website.content_area_selector_config %}

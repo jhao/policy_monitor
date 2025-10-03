@@ -346,6 +346,10 @@ def create_website() -> Any:
         url = request.form.get("url", "").strip()
         interval = int(request.form.get("interval", "60") or 60)
         fetch_subpages = bool(request.form.get("fetch_subpages"))
+        use_proxy = bool(request.form.get("use_proxy"))
+        proxy_interval_raw = int(request.form.get("proxy_request_interval", "0") or 0)
+        proxy_request_interval = max(0, proxy_interval_raw)
+        proxy_user_agent = request.form.get("proxy_user_agent", "").strip()
         title_selectors = request.form.get("title_selectors", "").strip()
         content_selectors = request.form.get("content_selectors", "").strip()
         content_area_selectors = request.form.get("content_area_selectors", "").strip()
@@ -363,6 +367,9 @@ def create_website() -> Any:
                 url=url,
                 interval_minutes=interval,
                 fetch_subpages=fetch_subpages,
+                use_proxy=use_proxy,
+                proxy_request_interval=proxy_request_interval,
+                proxy_user_agent=proxy_user_agent or None,
                 title_selector_config=title_selectors or None,
                 content_selector_config=content_selectors or None,
                 content_area_selector_config=content_area_selectors or None,
@@ -392,6 +399,17 @@ def edit_website(website_id: int) -> Any:
         website.url = request.form.get("url", website.url)
         website.interval_minutes = int(request.form.get("interval", website.interval_minutes))
         website.fetch_subpages = bool(request.form.get("fetch_subpages"))
+        website.use_proxy = bool(request.form.get("use_proxy"))
+        proxy_interval_raw = int(
+            request.form.get(
+                "proxy_request_interval",
+                website.proxy_request_interval if website.proxy_request_interval is not None else 0,
+            )
+            or 0
+        )
+        website.proxy_request_interval = max(0, proxy_interval_raw)
+        proxy_user_agent = request.form.get("proxy_user_agent", "").strip()
+        website.proxy_user_agent = proxy_user_agent or None
         website.title_selector_config = (
             request.form.get("title_selectors", "").strip() or None
         )
