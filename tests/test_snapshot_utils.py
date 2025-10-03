@@ -2,7 +2,17 @@ from __future__ import annotations
 
 import json
 
-from crawler import build_snapshot, parse_snapshot, summarize_html
+import pytest
+
+from crawler import (
+    build_snapshot,
+    etree,
+    lxml_html,
+    parse_snapshot,
+    summarize_html,
+    _extract_region_html,
+    _parse_selector_config,
+)
 from models import Website
 
 
@@ -115,3 +125,39 @@ def test_parse_snapshot_legacy_payloads_fill_missing_titles() -> None:
     assert entries[0]["title"] and entries[0]["title"].startswith("旧子标题")
     assert "旧内容" in (main_text or "")
     assert "子内容" in (entries[0]["text"] or "")
+
+
+def test_extract_region_html_supports_mixed_selectors() -> None:
+    if lxml_html is None or etree is None:
+        pytest.skip("lxml not available, XPath 规则将被忽略")
+
+    html = """
+    <html>
+      <body>
+        <div id="main">
+          <section class="content">
+            <ul class="news-list">
+              <li><a href="/a">条目一</a></li>
+              <li><a href="/b">条目二</a></li>
+            </ul>
+          </section>
+        </div>
+        <footer>页脚信息</footer>
+      </body>
+    </html>
+    """
+    selectors = _parse_selector_config(
+        "\n".join(
+            [
+                "css=.not-exists",
+                "xpath=//div[@id='main']//ul[@class='news-list']",
+            ]
+        )
+    )
+
+    region_html = _extract_region_html(html, selectors)
+
+    assert region_html is not None
+    assert "news-list" in region_html
+    assert "条目二" in region_html
+    assert "页脚信息" not in region_html

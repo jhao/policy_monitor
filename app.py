@@ -183,6 +183,7 @@ def create_website() -> Any:
         fetch_subpages = bool(request.form.get("fetch_subpages"))
         title_selectors = request.form.get("title_selectors", "").strip()
         content_selectors = request.form.get("content_selectors", "").strip()
+        content_area_selectors = request.form.get("content_area_selectors", "").strip()
         if not name or not url:
             flash("请输入网站名称和URL", "danger")
         else:
@@ -193,6 +194,7 @@ def create_website() -> Any:
                 fetch_subpages=fetch_subpages,
                 title_selector_config=title_selectors or None,
                 content_selector_config=content_selectors or None,
+                content_area_selector_config=content_area_selectors or None,
             )
             session.add(website)
             session.commit()
@@ -218,6 +220,9 @@ def edit_website(website_id: int) -> Any:
         )
         website.content_selector_config = (
             request.form.get("content_selectors", "").strip() or None
+        )
+        website.content_area_selector_config = (
+            request.form.get("content_area_selectors", "").strip() or None
         )
         session.add(website)
         session.commit()

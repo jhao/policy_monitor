@@ -31,6 +31,10 @@ def init_db() -> None:
             connection.exec_driver_sql(
                 "ALTER TABLE websites ADD COLUMN content_selector_config TEXT"
             )
+        if "content_area_selector_config" not in existing_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE websites ADD COLUMN content_area_selector_config TEXT"
+            )
 
         notification_columns = {
             row[1]

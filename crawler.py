@@ -479,6 +479,60 @@ def _extract_text_by_selectors(html: str, selectors: list[tuple[str, str]]) -> s
     return None
 
 
+def _extract_region_html(html: str, selectors: list[tuple[str, str]]) -> str | None:
+    if not selectors:
+        return None
+
+    soup: BeautifulSoup | None = None
+    tree: Any | None = None
+
+    for method, value in selectors:
+        if method == "css":
+            if soup is None:
+                soup = BeautifulSoup(html, "html.parser")
+            try:
+                element = soup.select_one(value)
+            except Exception:  # noqa: BLE001
+                LOGGER.debug("CSS 选择器 %s 解析失败", value, exc_info=True)
+                continue
+            if element is None:
+                continue
+            return str(element)
+        if method == "xpath":
+            if lxml_html is None or etree is None:
+                LOGGER.debug("XPath 规则 %s 被忽略，缺少 lxml 依赖", value)
+                continue
+            if tree is None:
+                try:
+                    tree = lxml_html.fromstring(html)
+                except Exception:  # noqa: BLE001
+                    LOGGER.debug("解析 HTML 失败，无法应用 XPath %s", value, exc_info=True)
+                    tree = None
+            if tree is None:
+                continue
+            try:
+                results = tree.xpath(value)
+            except Exception:  # noqa: BLE001
+                LOGGER.debug("执行 XPath %s 失败", value, exc_info=True)
+                continue
+            for result in results:
+                fragment = ""
+                if hasattr(result, "tag"):
+                    try:
+                        fragment = etree.tostring(result, encoding="unicode")  # type: ignore[arg-type]
+                    except Exception:  # noqa: BLE001
+                        LOGGER.debug("序列化 XPath 结果失败：%s", value, exc_info=True)
+                        fragment = ""
+                else:
+                    fragment = str(result)
+                fragment = fragment.strip()
+                if fragment:
+                    return fragment
+        else:
+            continue
+    return None
+
+
 def _summarize_without_preferences(html: str) -> tuple[str, str]:
     soup = BeautifulSoup(html, "html.parser")
     fallback_title = _extract_display_title(soup)
@@ -900,8 +954,17 @@ def run_task(task_id: int) -> None:
         new_html = fetch_html(website.url)
         add_detail("主页面抓取成功")
 
-        main_title, main_summary = summarize_html(new_html, website)
-        current_main_text = extract_body_text(new_html)
+        area_selectors = _parse_selector_config(website.content_area_selector_config)
+        effective_main_html = _extract_region_html(new_html, area_selectors)
+        if effective_main_html is None:
+            effective_main_html = new_html
+            if area_selectors:
+                add_detail("内容采集区域定位未匹配，使用整个页面", "warning")
+        elif area_selectors:
+            add_detail("已应用内容采集区域定位，仅分析匹配区域")
+
+        main_title, main_summary = summarize_html(effective_main_html, website)
+        current_main_text = extract_body_text(effective_main_html)
         LOGGER.info("Task %s fetched main page title: %s", task.name, main_title or "<无标题>")
         if main_title:
             add_detail(f"主页面标题：{main_title}")
@@ -914,15 +977,19 @@ def run_task(task_id: int) -> None:
         subpage_snapshots: list[dict[str, str | None]] = []
 
         if website.fetch_subpages:
-            new_links = compare_links(previous_main_html, new_html, website.url)
+            new_links = compare_links(previous_main_html, effective_main_html, website.url)
             LOGGER.debug("Found %d new links", len(new_links))
             add_detail(f"发现新链接 {len(new_links)} 个")
 
             for link in new_links:
                 add_detail(f"抓取子链接：{link}")
                 try:
-                    link_html = fetch_html(link)
+                    link_html_full = fetch_html(link)
                     add_detail(f"子链接抓取成功：{link}")
+                    link_area_html = _extract_region_html(link_html_full, area_selectors)
+                    if area_selectors and link_area_html is None:
+                        add_detail(f"子链接内容采集区域未匹配：{link}", "warning")
+                    link_html = link_area_html or link_html_full
                     subpage_snapshots.append(
                         {
                             "url": link,
@@ -1004,7 +1071,7 @@ def run_task(task_id: int) -> None:
                             "url": website.url,
                             "summary": summary or "",
                             "matches": matches,
-                            "html": new_html,
+                            "html": effective_main_html,
                             "base_url": website.url,
                         }
                     )
@@ -1014,7 +1081,7 @@ def run_task(task_id: int) -> None:
         else:
             add_detail("未发现符合条件的内容")
 
-        website.last_snapshot = build_snapshot(new_html, subpage_snapshots, main_title)
+        website.last_snapshot = build_snapshot(effective_main_html, subpage_snapshots, main_title)
         website.last_fetched_at = datetime.utcnow()
         task.last_run_at = datetime.utcnow()
         task.last_status = "success" if matched_results else "completed"
