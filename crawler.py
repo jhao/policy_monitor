@@ -205,16 +205,47 @@ DEFAULT_REQUEST_HEADERS: dict[str, str] = {
 }
 
 
+def _build_browser_like_headers(url: str) -> dict[str, str]:
+    """Return headers that mimic an actual browser request."""
+
+    headers = DEFAULT_REQUEST_HEADERS.copy()
+    headers.update(
+        {
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Referer": url,
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Fetch-User": "?1",
+            "Upgrade-Insecure-Requests": "1",
+        }
+    )
+    return headers
+
+
 def _fetch_html_with_requests(url: str) -> str:
-    response = requests.get(url, timeout=20, headers=DEFAULT_REQUEST_HEADERS)
-    try:
-        response.raise_for_status()
-    except requests.HTTPError as exc:
-        status = response.status_code
-        message = f"请求 {url} 失败，状态码 {status}"
-        if status == 403:
-            message += "，可能需要浏览器访问或额外的身份验证"
-        raise CrawlError(message) from exc
+    headers_sequence = [DEFAULT_REQUEST_HEADERS, _build_browser_like_headers(url)]
+    response: requests.Response | None = None
+
+    for attempt, headers in enumerate(headers_sequence, start=1):
+        response = requests.get(url, timeout=20, headers=headers)
+        try:
+            response.raise_for_status()
+            break
+        except requests.HTTPError as exc:
+            status = response.status_code
+            if status == 403 and attempt < len(headers_sequence):
+                LOGGER.info("请求 %s 返回 403，尝试使用更接近浏览器的请求头重试", url)
+                continue
+            message = f"请求 {url} 失败，状态码 {status}"
+            if status == 403:
+                message += "，可能需要浏览器访问或额外的身份验证"
+            raise CrawlError(message) from exc
+    else:  # pragma: no cover - 保底分支
+        raise CrawlError(f"无法成功请求 {url}")
+
+    assert response is not None  # for type checkers
     if not response.encoding or response.encoding.lower() == "iso-8859-1":
         apparent = response.apparent_encoding
         if apparent:
