@@ -173,6 +173,25 @@ def view_website_snapshot(website_id: int) -> Any:
         session.close()
 
 
+@app.route("/websites/<int:website_id>/snapshot/clear", methods=["POST"])
+def clear_website_snapshot(website_id: int) -> Any:
+    session = SessionLocal()
+    try:
+        website = session.get(Website, website_id)
+        if not website:
+            flash("未找到网站", "danger")
+            return redirect(url_for("list_websites"))
+
+        website.last_snapshot = None
+        website.last_fetched_at = None
+        session.add(website)
+        session.commit()
+        flash("已清空网站快照", "success")
+        return redirect(url_for("list_websites"))
+    finally:
+        session.close()
+
+
 @app.route("/websites/new", methods=["GET", "POST"])
 def create_website() -> Any:
     session = SessionLocal()

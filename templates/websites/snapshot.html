@@ -4,6 +4,13 @@
   <h2 class="mb-0">网站快照 - {{ website.name }}</h2>
   <div class="d-flex flex-wrap gap-2">
     <a class="btn btn-secondary" href="{{ url_for('list_websites') }}">返回网站列表</a>
+    <form
+      method="post"
+      action="{{ url_for('clear_website_snapshot', website_id=website.id) }}"
+      onsubmit="return confirm('确认清空该网站的历史快照？');"
+    >
+      <button type="submit" class="btn btn-danger">清空快照</button>
+    </form>
     {% if related_tasks %}
       {% for task in related_tasks %}
       <a class="btn btn-outline-primary" href="{{ url_for('view_task', task_id=task.id) }}">{{ task.name }}</a>
