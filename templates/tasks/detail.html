@@ -4,7 +4,8 @@
   'running': ('warning', '执行中'),
   'success': ('success', '成功'),
   'completed': ('primary', '已完成'),
-  'failed': ('danger', '失败')
+  'failed': ('danger', '失败'),
+  'cancelled': ('secondary', '已终止')
 } %}
 
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
@@ -13,6 +14,11 @@
     <form method="post" action="{{ url_for('run_task_now', task_id=task.id) }}">
       <button type="submit" class="btn btn-primary" {% if active_log %}disabled{% endif %}>立即执行任务</button>
     </form>
+    {% if active_log %}
+    <form method="post" action="{{ url_for('stop_task_execution', task_id=task.id) }}">
+      <button type="submit" class="btn btn-outline-danger">停止执行</button>
+    </form>
+    {% endif %}
     <a class="btn btn-secondary" href="{{ url_for('list_tasks') }}">返回任务列表</a>
   </div>
 </div>
@@ -194,7 +200,8 @@
       running: {cls: 'warning', text: '执行中'},
       success: {cls: 'success', text: '成功'},
       completed: {cls: 'primary', text: '已完成'},
-      failed: {cls: 'danger', text: '失败'}
+      failed: {cls: 'danger', text: '失败'},
+      cancelled: {cls: 'secondary', text: '已终止'}
     };
 
     let lastEntryId = 0;

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 from collections import Counter, OrderedDict
 from datetime import datetime
 from html import escape as html_escape
@@ -37,6 +38,52 @@ SIMILARITY_THRESHOLD = 0.6
 LOGGER = logging.getLogger(__name__)
 _PLAYWRIGHT_IMPORT_FAILED = False
 _API_TEMPLATE_PATTERN = re.compile(r"\{\s*([^{}]+?)\s*\}")
+
+_RUNNING_TASKS: dict[int, threading.Event] = {}
+_RUNNING_TASKS_LOCK = threading.Lock()
+
+
+class TaskCancelledError(RuntimeError):
+    """Raised when a running monitor task receives a cancellation request."""
+
+
+def _register_running_task(task_id: int) -> threading.Event | None:
+    """Register a task as running and return its cancellation event."""
+
+    with _RUNNING_TASKS_LOCK:
+        if task_id in _RUNNING_TASKS:
+            return None
+        event = threading.Event()
+        _RUNNING_TASKS[task_id] = event
+        return event
+
+
+def _unregister_running_task(task_id: int) -> None:
+    """Remove a task from the running registry."""
+
+    with _RUNNING_TASKS_LOCK:
+        _RUNNING_TASKS.pop(task_id, None)
+
+
+def is_task_running(task_id: int) -> bool:
+    """Return ``True`` if the given task currently has an active run."""
+
+    with _RUNNING_TASKS_LOCK:
+        return task_id in _RUNNING_TASKS
+
+
+def request_stop_task(task_id: int) -> bool:
+    """Signal a running task to stop.
+
+    Returns ``True`` if the task was found and a cancellation signal was sent.
+    """
+
+    with _RUNNING_TASKS_LOCK:
+        event = _RUNNING_TASKS.get(task_id)
+    if event is None:
+        return False
+    event.set()
+    return True
 
 
 def _is_non_empty_text(value: str | None) -> bool:
@@ -1173,8 +1220,14 @@ def _send_task_notifications(
 
 
 def run_task(task_id: int) -> None:
+    cancel_event = _register_running_task(task_id)
+    if cancel_event is None:
+        LOGGER.warning("Task %s is already running", task_id)
+        return
+
     session = SessionLocal()
     log_entry_id: int | None = None
+    cancellation_noted = False
 
     def add_detail(message: str, level: str = "info") -> None:
         if log_entry_id is None:
@@ -1183,7 +1236,16 @@ def run_task(task_id: int) -> None:
         session.add(detail)
         session.commit()
 
+    def ensure_not_cancelled() -> None:
+        nonlocal cancellation_noted
+        if cancel_event.is_set():
+            if not cancellation_noted:
+                add_detail("检测到任务停止请求，正在终止后续步骤", "warning")
+                cancellation_noted = True
+            raise TaskCancelledError("任务已被取消")
+
     try:
+        ensure_not_cancelled()
         task = session.get(MonitorTask, task_id)
         if not task:
             LOGGER.error("Task %s not found", task_id)
@@ -1197,6 +1259,7 @@ def run_task(task_id: int) -> None:
         add_detail(f"开始执行任务《{task.name}》", "info")
 
         website = task.website
+        ensure_not_cancelled()
         if not website:
             raise CrawlError("监控任务未配置网站")
 
@@ -1208,6 +1271,7 @@ def run_task(task_id: int) -> None:
         snapshot_payload: str | None = None
 
         if website.is_json_api:
+            ensure_not_cancelled()
             add_detail("以 JSON API 模式抓取")
             api_text, api_data = fetch_json_content(website.url)
             add_detail("接口响应获取成功")
@@ -1244,9 +1308,11 @@ def run_task(task_id: int) -> None:
                 add_detail("未发现新的链接")
             area_selectors = _parse_selector_config(website.content_area_selector_config)
             for item in new_items:
+                ensure_not_cancelled()
                 link = item["url"]
                 add_detail(f"抓取详情页：{link}")
                 try:
+                    ensure_not_cancelled()
                     link_html_full = fetch_html(link)
                     add_detail(f"详情页抓取成功：{link}")
                     link_area_html = _extract_region_html(link_html_full, area_selectors)
@@ -1314,6 +1380,7 @@ def run_task(task_id: int) -> None:
             snapshot_payload = build_json_api_snapshot(api_text, items, subpage_snapshots)
         else:
             previous_main_html, _, _, previous_main_text = parse_snapshot(website.last_snapshot)
+            ensure_not_cancelled()
             new_html = fetch_html(website.url)
             add_detail("主页面抓取成功")
 
@@ -1347,8 +1414,10 @@ def run_task(task_id: int) -> None:
                 add_detail(f"发现新链接 {len(new_links)} 个")
 
                 for link in new_links:
+                    ensure_not_cancelled()
                     add_detail(f"抓取子链接：{link}")
                     try:
+                        ensure_not_cancelled()
                         link_html_full = fetch_html(link)
                         add_detail(f"子链接抓取成功：{link}")
                         link_area_html = _extract_region_html(link_html_full, area_selectors)
@@ -1418,6 +1487,7 @@ def run_task(task_id: int) -> None:
                 has_changed = (previous_text_to_compare or "") != current_main_text
                 add_detail("检测到页面发生变化" if has_changed else "页面内容无变化")
                 if has_changed:
+                    ensure_not_cancelled()
                     title, summary = main_title, main_summary
                     scores = score_contents(title, summary, task.watch_contents)
                     matches = [
@@ -1454,6 +1524,7 @@ def run_task(task_id: int) -> None:
 
             snapshot_payload = build_snapshot(effective_main_html, subpage_snapshots, main_title)
 
+        ensure_not_cancelled()
         if matched_results:
             add_detail(f"发现匹配结果 {len(matched_results)} 条", "success")
         else:
@@ -1486,8 +1557,10 @@ def run_task(task_id: int) -> None:
         session.commit()
 
         if matched_results:
+            ensure_not_cancelled()
             merged_payload: OrderedDict[str, dict[str, Any]] = OrderedDict()
             for item in matched_results:
+                ensure_not_cancelled()
                 url = item["url"]
                 summary_text = (item["summary"] or "")[:200]
                 image_url = _extract_first_image_url(item.get("html"), item.get("base_url")) or ""
@@ -1508,6 +1581,7 @@ def run_task(task_id: int) -> None:
                     entry["pic"] = image_url
                 matches_map: OrderedDict[Any, dict[str, Any]] = entry["matches_map"]
                 for content, score in item["matches"]:
+                    ensure_not_cancelled()
                     identifier = getattr(content, "id", None) or content.text
                     existing = matches_map.get(identifier)
                     if existing is None:
@@ -1517,6 +1591,7 @@ def run_task(task_id: int) -> None:
 
             payload_items: list[dict[str, str]] = []
             for entry in merged_payload.values():
+                ensure_not_cancelled()
                 matches_label = "、".join(
                     f"{value['text']}({value['score']:.2f})" for value in entry["matches_map"].values()
                 )
@@ -1529,7 +1604,38 @@ def run_task(task_id: int) -> None:
                         "pic": entry["pic"],
                     }
                 )
+            ensure_not_cancelled()
             _send_task_notifications(session, task, payload_items, add_detail)
+    except TaskCancelledError:
+        session.rollback()
+        LOGGER.info("Task %s cancelled by request", task_id)
+
+        if log_entry_id is None:
+            log_entry = CrawlLog(task_id=task_id)
+            session.add(log_entry)
+            session.commit()
+            log_entry_id = log_entry.id
+
+        add_detail("任务执行已被停止", "warning")
+
+        task = session.get(MonitorTask, task_id)
+        if task:
+            task.last_status = "cancelled"
+            task.last_run_at = datetime.utcnow()
+            session.add(task)
+
+        log_entry = session.get(CrawlLog, log_entry_id)
+        if log_entry is None:
+            log_entry = CrawlLog(task_id=task_id)
+            session.add(log_entry)
+            session.commit()
+            log_entry_id = log_entry.id
+
+        log_entry.status = "cancelled"
+        log_entry.run_finished_at = datetime.utcnow()
+        log_entry.message = "任务被手动终止"
+        session.add(log_entry)
+        session.commit()
     except Exception as exc:  # noqa: BLE001
         session.rollback()
         LOGGER.exception("Task %s failed", task_id)
@@ -1563,3 +1669,4 @@ def run_task(task_id: int) -> None:
         session.commit()
     finally:
         session.close()
+        _unregister_running_task(task_id)
