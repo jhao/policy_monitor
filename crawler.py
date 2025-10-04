@@ -939,8 +939,17 @@ def _collect_api_items(data_list: list[Any], website: Website) -> tuple[list[dic
         if url in seen_urls:
             continue
         seen_urls.add(url)
-        title_source = _lookup_json_path(entry, website.api_title_path or "") if website.api_title_path else None
-        title = _normalize_api_title(title_source, url)
+        if website.api_title_path:
+            title_source = _lookup_json_path(entry, website.api_title_path)
+            normalized = _normalize_api_title(title_source, "")
+            title = normalized.strip() or None
+        else:
+            title_source = _lookup_json_path(entry, "title")
+            if title_source is None:
+                title_source = entry
+            title = _normalize_api_title(title_source, url).strip()
+            if not title:
+                title = url
         items.append({"url": url, "title": title, "raw": entry})
     return items, warnings
 
