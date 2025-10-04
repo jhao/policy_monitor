@@ -1,4 +1,7 @@
+from types import SimpleNamespace
+
 from crawler import (
+    _collect_api_items,
     _lookup_json_path,
     _render_api_template,
     _load_previous_api_urls,
@@ -70,3 +73,43 @@ def test_load_previous_api_urls_extracts_urls_from_snapshot():
 
     urls = _load_previous_api_urls(snapshot)
     assert urls == {"https://example.com/a", "https://example.com/b"}
+
+
+def _make_website(**overrides):
+    defaults = {
+        "api_title_path": None,
+        "api_url_path": "link",
+        "api_url_template": None,
+        "api_detail_url_base": None,
+        "url": "https://example.com/api",
+    }
+    defaults.update(overrides)
+    return SimpleNamespace(**defaults)
+
+
+def test_collect_api_items_prefers_api_title_when_path_provided():
+    website = _make_website(api_title_path="meta.title")
+    data = [
+        {"link": "https://example.com/detail/1", "meta": {"title": "Hello"}},
+        {"link": "https://example.com/detail/2", "meta": {}},
+    ]
+
+    items, warnings = _collect_api_items(data, website)
+
+    assert warnings == []
+    assert items[0]["title"] == "Hello"
+    assert items[1]["title"] is None
+
+
+def test_collect_api_items_falls_back_to_url_when_no_title_path():
+    website = _make_website(api_title_path=None)
+    data = [
+        {"link": "/detail/3", "title": "World"},
+        {"link": "/detail/4", "title": ""},
+    ]
+
+    items, warnings = _collect_api_items(data, website)
+
+    assert warnings == []
+    assert items[0]["title"] == "World"
+    assert items[1]["title"] == "https://example.com/detail/4"
