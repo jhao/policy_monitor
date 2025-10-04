@@ -122,10 +122,19 @@
     var detailConfig = document.getElementById('detailConfig');
     var useProxyCheckbox = document.getElementById('useProxy');
     var proxyAdvanced = document.getElementById('proxyAdvanced');
+    var apiTitlePathInput = document.querySelector('input[name="api_title_path"]');
+
+    function hasApiTitlePath() {
+      return isJsonApiCheckbox.checked && apiTitlePathInput && apiTitlePathInput.value.trim() !== '';
+    }
 
     function toggleDetailSelectors() {
       if (isJsonApiCheckbox.checked) {
-        detailSelectors.classList.add('d-none');
+        if (hasApiTitlePath()) {
+          detailSelectors.classList.add('d-none');
+        } else {
+          detailSelectors.classList.remove('d-none');
+        }
         return;
       }
 
@@ -140,7 +149,11 @@
       if (isJsonApiCheckbox.checked) {
         jsonApiConfig.classList.remove('d-none');
         listConfig.classList.add('d-none');
-        detailConfig.classList.add('d-none');
+        if (hasApiTitlePath()) {
+          detailConfig.classList.add('d-none');
+        } else {
+          detailConfig.classList.remove('d-none');
+        }
       } else {
         jsonApiConfig.classList.add('d-none');
         listConfig.classList.remove('d-none');
@@ -163,6 +176,11 @@
     fetchSubpagesCheckbox.addEventListener('change', toggleDetailSelectors);
     isJsonApiCheckbox.addEventListener('change', toggleJsonApiConfig);
     useProxyCheckbox.addEventListener('change', toggleProxyConfig);
+    if (apiTitlePathInput) {
+      apiTitlePathInput.addEventListener('input', function () {
+        toggleJsonApiConfig();
+      });
+    }
   });
 </script>
 
