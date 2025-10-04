@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>监控结果归档（演示数据）</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; margin: 0; background: #0f172a; color: #e2e8f0; }
+    header { padding: 28px 40px; background: rgba(14, 38, 74, 0.95); backdrop-filter: blur(10px); border-bottom: 1px solid rgba(148, 163, 184, 0.2); }
+    header h1 { margin: 0; font-size: 26px; }
+    header p { margin: 6px 0 0; color: #94a3b8; }
+    main { padding: 32px 40px; display: grid; grid-template-columns: 280px 1fr; gap: 28px; }
+    .filters { background: rgba(15, 23, 42, 0.85); border-radius: 18px; padding: 20px 22px; box-shadow: 0 18px 45px rgba(2, 6, 23, 0.6); border: 1px solid rgba(148, 163, 184, 0.12); }
+    .filters h2 { margin-top: 0; font-size: 16px; letter-spacing: 1px; text-transform: uppercase; color: #94a3b8; }
+    .filters label { display: block; font-size: 12px; margin-bottom: 6px; text-transform: uppercase; color: #64748b; }
+    .filters select,
+    .filters input { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(148, 163, 184, 0.3); background: rgba(15, 23, 42, 0.6); color: #e2e8f0; margin-bottom: 16px; }
+    .filters button { width: 100%; padding: 10px; border-radius: 12px; border: none; background: linear-gradient(135deg, #38bdf8, #6366f1); color: #fff; font-size: 13px; font-weight: 600; }
+    .results-panel { background: rgba(15, 23, 42, 0.75); border-radius: 18px; padding: 24px 26px; box-shadow: 0 18px 45px rgba(2, 6, 23, 0.6); border: 1px solid rgba(148, 163, 184, 0.12); display: flex; flex-direction: column; gap: 18px; }
+    .result-card { background: rgba(30, 41, 59, 0.85); border-radius: 16px; padding: 18px 20px; border: 1px solid rgba(148, 163, 184, 0.18); display: grid; grid-template-columns: 1fr auto; gap: 12px; }
+    .result-card h3 { margin: 0; font-size: 18px; color: #f1f5f9; }
+    .result-card p { margin: 6px 0 0; color: #cbd5f5; line-height: 1.6; }
+    .result-meta { font-size: 13px; color: #94a3b8; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+    .tag { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 12px; background: rgba(99, 102, 241, 0.16); color: #c7d2fe; }
+    .score { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 12px; font-size: 13px; background: rgba(16, 185, 129, 0.15); color: #34d399; }
+    .link { color: #38bdf8; text-decoration: none; font-weight: 600; }
+    .link:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>监控结果归档</h1>
+    <p>智能抓取最新政策资讯，并按任务、站点和关注内容归档显示</p>
+  </header>
+  <main>
+    <aside class="filters">
+      <h2>筛选条件</h2>
+      <label>监测任务</label>
+      <select>
+        <option>全部任务</option>
+        <option>专精特新政策速递</option>
+        <option>制造业扶持政策</option>
+      </select>
+      <label>关联网站</label>
+      <select>
+        <option>全部站点</option>
+        <option>国家发展改革委</option>
+        <option>工业和信息化部</option>
+      </select>
+      <label>关注关键词</label>
+      <select>
+        <option>全部内容</option>
+        <option>数字化转型</option>
+        <option>补贴申请</option>
+      </select>
+      <label>时间范围</label>
+      <input type="text" value="2024-11-01 ~ 2024-11-30">
+      <button>立即筛选</button>
+    </aside>
+    <section class="results-panel">
+      <div class="result-card">
+        <div>
+          <div class="tag">专精特新政策速递 · 国家发展改革委</div>
+          <h3><a class="link" href="#">关于推动产业数字化发展的指导意见</a></h3>
+          <p>提出到 2027 年建成覆盖重点产业的智能化政策服务体系，明确对符合条件的专精特新企业给予资金支持与税收优惠。</p>
+        </div>
+        <div class="result-meta">
+          <span class="score">语义匹配度 0.87</span>
+          <span>2024-11-30 12:18</span>
+          <span>来源：国家发展改革委</span>
+        </div>
+      </div>
+      <div class="result-card">
+        <div>
+          <div class="tag">制造业扶持政策 · 工业和信息化部</div>
+          <h3><a class="link" href="#">关于征集2025年度智能制造示范工厂的通知</a></h3>
+          <p>面向高端装备、电子信息等重点行业征集智能制造示范工厂项目，要求同步提交项目实施方案与技术改造预算。</p>
+        </div>
+        <div class="result-meta">
+          <span class="score">语义匹配度 0.81</span>
+          <span>2024-11-29 18:42</span>
+          <span>来源：工业和信息化部</span>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

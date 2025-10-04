@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <defs>
+    <linearGradient id="header" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0f6eff"/>
+      <stop offset="1" stop-color="#42b9ff"/>
+    </linearGradient>
+    <style>
+      text { font-family: 'Segoe UI', 'PingFang SC', sans-serif; fill: #1f2933; }
+      .white { fill: #fff; }
+      .subtitle { fill: rgba(255,255,255,0.85); }
+      .badge { font-size: 14px; font-weight: 600; fill: #0f6eff; }
+      .pill { font-size: 12px; fill: #4338ca; }
+      .muted { fill: #6b7280; font-size: 12px; }
+    </style>
+  </defs>
+  <rect width="1280" height="720" fill="#f3f6fb"/>
+  <rect width="1280" height="160" fill="url(#header)"/>
+  <text x="80" y="88" font-size="32" font-weight="600" class="white">监控任务中心</text>
+  <text x="80" y="120" font-size="18" class="subtitle">集中展示所有关注站点的监测任务与调度状态</text>
+  <g transform="translate(80,200)">
+    <rect width="1120" height="420" rx="26" fill="#fff" stroke="#d5e3ff" stroke-opacity="0.6"/>
+    <g transform="translate(32,40)">
+      <text y="0" font-size="14" fill="#5f6b7c">任务名称</text>
+      <text x="220" y="0" font-size="14" fill="#5f6b7c">监测网站</text>
+      <text x="360" y="0" font-size="14" fill="#5f6b7c">关注内容</text>
+      <text x="620" y="0" font-size="14" fill="#5f6b7c">最后执行</text>
+      <text x="780" y="0" font-size="14" fill="#5f6b7c">下一次执行</text>
+      <text x="920" y="0" font-size="14" fill="#5f6b7c">任务状态</text>
+      <text x="1040" y="0" font-size="14" fill="#5f6b7c">执行状态</text>
+    </g>
+    <g transform="translate(32,80)">
+      <rect width="1056" height="140" rx="20" fill="#f8fbff" stroke="#deebff"/>
+      <text x="20" y="36" class="badge">🛰 自动监控</text>
+      <text x="20" y="68" font-size="20" font-weight="600">专精特新政策速递</text>
+      <text x="220" y="52" font-size="16">国家发展改革委</text>
+      <text x="360" y="44" class="pill" font-size="12">产业政策 · 数字化转型</text>
+      <text x="360" y="72" class="pill" font-size="12">制造业 · 专精特新</text>
+      <text x="620" y="48" fill="#0f6eff" font-size="16">2024-11-30 12:20</text>
+      <text x="620" y="74" class="muted">UTC+08</text>
+      <text x="780" y="48" fill="#0991c7" font-size="16">12 分钟后</text>
+      <text x="780" y="74" class="muted">计划于 12:32</text>
+      <text x="920" y="48" fill="#0f9d58" font-size="16">🟢 已启用</text>
+      <text x="1040" y="48" fill="#b45309" font-size="16">⏳ 执行中</text>
+    </g>
+    <g transform="translate(32,240)">
+      <rect width="1056" height="140" rx="20" fill="#f8fbff" stroke="#deebff"/>
+      <text x="20" y="36" class="badge">🛰 自动监控</text>
+      <text x="20" y="68" font-size="20" font-weight="600">制造业扶持政策</text>
+      <text x="220" y="52" font-size="16">工业和信息化部</text>
+      <text x="360" y="44" class="pill">补贴申请</text>
+      <text x="360" y="72" class="pill">项目公示</text>
+      <text x="620" y="48" fill="#0f6eff" font-size="16">2024-11-30 11:55</text>
+      <text x="620" y="74" class="muted">UTC+08</text>
+      <text x="780" y="48" fill="#0991c7" font-size="16">5 分钟后</text>
+      <text x="780" y="74" class="muted">计划于 12:25</text>
+      <text x="920" y="48" fill="#0f9d58" font-size="16">🟢 已启用</text>
+      <text x="1040" y="48" fill="#6b7280" font-size="16">⚙️ 等待调度</text>
+    </g>
+    <text x="32" y="404" class="muted">数据来自演示环境，实际运行时将实时更新</text>
+  </g>
+</svg>
