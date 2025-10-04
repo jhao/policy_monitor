@@ -1446,9 +1446,12 @@ def run_task(task_id: int) -> None:
                     add_detail(f"详情页抓取失败：{link}", "warning")
                     subpage_errors.append(link)
                     continue
-                title, summary = summarize_html(link_html, website)
-                if not _is_non_empty_text(title):
-                    title = item["title"]
+                page_title, summary = summarize_html(link_html, website)
+                api_title = item.get("title")
+                if website.api_title_path:
+                    title = api_title if _is_non_empty_text(api_title) else page_title
+                else:
+                    title = page_title if _is_non_empty_text(page_title) else api_title
                 LOGGER.info(
                     "Task %s fetched API detail %s title: %s",
                     task.name,
