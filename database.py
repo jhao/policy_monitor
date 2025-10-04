@@ -23,42 +23,25 @@ def init_db() -> None:
             row[1]
             for row in connection.exec_driver_sql("PRAGMA table_info(websites)").fetchall()
         }
-        if "title_selector_config" not in existing_columns:
-            connection.exec_driver_sql(
-                "ALTER TABLE websites ADD COLUMN title_selector_config TEXT"
-            )
-        if "content_selector_config" not in existing_columns:
-            connection.exec_driver_sql(
-                "ALTER TABLE websites ADD COLUMN content_selector_config TEXT"
-            )
-        if "content_area_selector_config" not in existing_columns:
-            connection.exec_driver_sql(
-                "ALTER TABLE websites ADD COLUMN content_area_selector_config TEXT"
-            )
-        if "is_json_api" not in existing_columns:
-            connection.exec_driver_sql(
-                "ALTER TABLE websites ADD COLUMN is_json_api BOOLEAN DEFAULT 0"
-            )
-        if "api_list_path" not in existing_columns:
-            connection.exec_driver_sql(
-                "ALTER TABLE websites ADD COLUMN api_list_path TEXT"
-            )
-        if "api_title_path" not in existing_columns:
-            connection.exec_driver_sql(
-                "ALTER TABLE websites ADD COLUMN api_title_path TEXT"
-            )
-        if "api_url_path" not in existing_columns:
-            connection.exec_driver_sql(
-                "ALTER TABLE websites ADD COLUMN api_url_path TEXT"
-            )
-        if "api_url_template" not in existing_columns:
-            connection.exec_driver_sql(
-                "ALTER TABLE websites ADD COLUMN api_url_template TEXT"
-            )
-        if "api_detail_url_base" not in existing_columns:
-            connection.exec_driver_sql(
-                "ALTER TABLE websites ADD COLUMN api_detail_url_base TEXT"
-            )
+
+        website_alter_statements = {
+            "title_selector_config": "ALTER TABLE websites ADD COLUMN title_selector_config TEXT",
+            "content_selector_config": "ALTER TABLE websites ADD COLUMN content_selector_config TEXT",
+            "content_area_selector_config": "ALTER TABLE websites ADD COLUMN content_area_selector_config TEXT",
+            "is_json_api": "ALTER TABLE websites ADD COLUMN is_json_api BOOLEAN DEFAULT 0",
+            "api_list_path": "ALTER TABLE websites ADD COLUMN api_list_path TEXT",
+            "api_title_path": "ALTER TABLE websites ADD COLUMN api_title_path TEXT",
+            "api_url_path": "ALTER TABLE websites ADD COLUMN api_url_path TEXT",
+            "api_url_template": "ALTER TABLE websites ADD COLUMN api_url_template TEXT",
+            "api_detail_url_base": "ALTER TABLE websites ADD COLUMN api_detail_url_base TEXT",
+            "use_proxy": "ALTER TABLE websites ADD COLUMN use_proxy BOOLEAN DEFAULT 0",
+            "proxy_request_interval": "ALTER TABLE websites ADD COLUMN proxy_request_interval INTEGER DEFAULT 0",
+            "proxy_user_agent": "ALTER TABLE websites ADD COLUMN proxy_user_agent VARCHAR(255)",
+        }
+
+        for column_name, statement in website_alter_statements.items():
+            if column_name not in existing_columns:
+                connection.exec_driver_sql(statement)
 
         notification_columns = {
             row[1]
