@@ -50,7 +50,11 @@ _setup_complete = False
 
 
 @app.template_filter("format_datetime")
-def format_datetime_filter(value: datetime | None) -> str:
+def format_datetime_filter(value: datetime | None, fmt: str | None = None) -> str:
+    """Render datetimes in templates with optional custom formatting."""
+
+    if fmt:
+        return format_local_datetime(value, fmt)
     return format_local_datetime(value)
 
 
