@@ -4,7 +4,7 @@
   <h2>监控任务</h2>
   <a href="{{ url_for('create_task') }}" class="btn btn-primary">新增任务</a>
 </div>
-<table class="table table-striped">
+<table class="table table-striped align-middle">
   <thead>
     <tr>
       <th>名称</th>
@@ -29,11 +29,59 @@
           <span class="badge text-bg-secondary">{{ content.category.name if content.category else '未分类' }}：{{ content.text }}</span>
         {% endfor %}
       </td>
-      <td>{{ row.last_run_at|format_datetime or '尚未执行' }}</td>
-      <td>{{ row.next_run_at|format_datetime or '待调度' }}</td>
-      <td>{{ '有效' if task.is_active else '无效' }}</td>
-      <td>{{ '执行中' if row.is_running else '未执行' }}</td>
-      <td>{{ row.last_result_label }}</td>
+      <td>
+        {% set last_run_compact = row.last_run_at|format_datetime('%Y-%m-%d %H:%M') %}
+        {% set last_run_full = row.last_run_at|format_datetime('%Y-%m-%d %H:%M:%S %Z') %}
+        {% if last_run_compact %}
+        <div class="d-flex align-items-center gap-2">
+          <span class="badge rounded-pill text-bg-primary">🕒</span>
+          <div>
+            <div class="fw-semibold">{{ last_run_compact }}</div>
+            <small class="text-muted">{{ last_run_full }}</small>
+          </div>
+        </div>
+        {% else %}
+        <span class="badge text-bg-secondary">尚未执行</span>
+        {% endif %}
+      </td>
+      <td>
+        {% set next_run_compact = row.next_run_at|format_datetime('%Y-%m-%d %H:%M') %}
+        {% set next_run_full = row.next_run_at|format_datetime('%Y-%m-%d %H:%M:%S %Z') %}
+        {% if next_run_compact %}
+        <div class="d-flex align-items-center gap-2">
+          <span class="badge rounded-pill text-bg-info">📅</span>
+          <div>
+            <div class="fw-semibold">{{ next_run_compact }}</div>
+            <small class="text-muted">{{ next_run_full }}</small>
+          </div>
+        </div>
+        {% else %}
+        <span class="badge text-bg-secondary">待调度</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if task.is_active %}
+        <span class="badge rounded-pill text-bg-success"><span class="me-1">🟢</span>有效</span>
+        {% else %}
+        <span class="badge rounded-pill text-bg-secondary"><span class="me-1">⏸</span>无效</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if row.is_running %}
+        <span class="badge rounded-pill text-bg-warning text-dark"><span class="me-1">⏳</span>执行中</span>
+        {% else %}
+        <span class="badge rounded-pill text-bg-light text-muted border"><span class="me-1">⚙️</span>未执行</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if row.last_result_label == '成功' %}
+        <span class="badge rounded-pill text-bg-success"><span class="me-1">✅</span>成功</span>
+        {% elif row.last_result_label == '失败' %}
+        <span class="badge rounded-pill text-bg-danger"><span class="me-1">❌</span>失败</span>
+        {% else %}
+        <span class="badge rounded-pill text-bg-secondary"><span class="me-1">ℹ️</span>未执行</span>
+        {% endif %}
+      </td>
       <td>
         <a class="btn btn-sm btn-info" href="{{ url_for('edit_task', task_id=task.id) }}">编辑</a>
         <form action="{{ url_for('toggle_task', task_id=task.id) }}" method="post" class="d-inline">
