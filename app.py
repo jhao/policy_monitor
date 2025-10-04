@@ -1606,4 +1606,4 @@ def delete_proxy_endpoint(proxy_id: int) -> Any:
 if __name__ == "__main__":
     init_db()
     scheduler.start()
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5005, debug=True)
