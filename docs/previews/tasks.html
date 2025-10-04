@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>监控任务（演示数据）</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body {
+      font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+      margin: 0;
+      background: #f3f6fb;
+      color: #1f2933;
+    }
+    header {
+      background: linear-gradient(135deg, #0f6eff, #42b9ff);
+      color: #fff;
+      padding: 24px 40px;
+      box-shadow: 0 10px 30px rgba(15, 110, 255, 0.25);
+    }
+    header h1 {
+      margin: 0 0 6px;
+      font-size: 28px;
+      letter-spacing: 1px;
+    }
+    header p { margin: 0; opacity: 0.85; }
+    main { padding: 32px 40px; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 18px; overflow: hidden; box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08); }
+    thead { background: #f0f7ff; }
+    th, td { padding: 16px 18px; text-align: left; vertical-align: middle; }
+    th { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: #5f6b7c; }
+    tbody tr + tr { border-top: 1px solid #eef2f7; }
+    .badge { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+    .badge-pill { border-radius: 999px; }
+    .badge-primary { background: rgba(15, 110, 255, 0.12); color: #0f6eff; }
+    .badge-info { background: rgba(35, 197, 255, 0.16); color: #0991c7; }
+    .badge-success { background: rgba(34, 197, 94, 0.14); color: #0f9d58; }
+    .badge-warning { background: rgba(245, 158, 11, 0.15); color: #b45309; }
+    .badge-danger { background: rgba(239, 68, 68, 0.15); color: #b91c1c; }
+    .badge-muted { background: #f3f4f6; color: #6b7280; border: 1px solid #e5e7eb; }
+    .tags { display: flex; flex-wrap: wrap; gap: 8px; }
+    .tag { background: #eef2ff; color: #4338ca; padding: 6px 10px; border-radius: 999px; font-size: 12px; }
+    .actions { display: flex; gap: 10px; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; padding: 8px 16px; border-radius: 10px; text-decoration: none; font-size: 13px; font-weight: 600; }
+    .btn-info { background: linear-gradient(135deg, #6366f1, #22d3ee); color: #fff; }
+    .btn-warning { background: linear-gradient(135deg, #f59e0b, #f97316); color: #fff; }
+    .btn-danger { background: linear-gradient(135deg, #ef4444, #f43f5e); color: #fff; }
+    footer { margin-top: 24px; color: #6b7280; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>监控任务中心</h1>
+    <p>集中展示所有关注站点的监测任务与调度状态</p>
+  </header>
+  <main>
+    <table>
+      <thead>
+        <tr>
+          <th>任务名称</th>
+          <th>监测网站</th>
+          <th>关注内容</th>
+          <th>最后执行</th>
+          <th>下一次执行</th>
+          <th>任务状态</th>
+          <th>执行状态</th>
+          <th>最新结果</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <div class="badge badge-primary badge-pill">🛰 自动监控</div>
+            <div style="font-size:16px;font-weight:600;margin-top:4px;">专精特新政策速递</div>
+          </td>
+          <td>国家发展改革委</td>
+          <td>
+            <div class="tags">
+              <span class="tag">产业政策 · 数字化转型</span>
+              <span class="tag">制造业 · 专精特新</span>
+            </div>
+          </td>
+          <td>
+            <div class="badge badge-primary badge-pill">2024-11-30 12:20</div>
+            <div style="font-size:12px;color:#6b7280;margin-top:4px;">UTC+08</div>
+          </td>
+          <td>
+            <div class="badge badge-info badge-pill">12 分钟后</div>
+            <div style="font-size:12px;color:#6b7280;margin-top:4px;">计划于 12:32</div>
+          </td>
+          <td><span class="badge badge-success">🟢 已启用</span></td>
+          <td><span class="badge badge-warning">⏳ 执行中</span></td>
+          <td><span class="badge badge-success">✅ 成功</span></td>
+          <td>
+            <div class="actions">
+              <a class="btn btn-info" href="#">查看</a>
+              <a class="btn btn-warning" href="#">暂停</a>
+              <a class="btn btn-danger" href="#">删除</a>
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <div class="badge badge-primary badge-pill">🛰 自动监控</div>
+            <div style="font-size:16px;font-weight:600;margin-top:4px;">制造业扶持政策</div>
+          </td>
+          <td>工业和信息化部</td>
+          <td>
+            <div class="tags">
+              <span class="tag">补贴申请</span>
+              <span class="tag">项目公示</span>
+            </div>
+          </td>
+          <td>
+            <div class="badge badge-primary badge-pill">2024-11-30 11:55</div>
+            <div style="font-size:12px;color:#6b7280;margin-top:4px;">UTC+08</div>
+          </td>
+          <td>
+            <div class="badge badge-info badge-pill">5 分钟后</div>
+            <div style="font-size:12px;color:#6b7280;margin-top:4px;">计划于 12:25</div>
+          </td>
+          <td><span class="badge badge-success">🟢 已启用</span></td>
+          <td><span class="badge badge-muted">⚙️ 等待调度</span></td>
+          <td><span class="badge badge-danger">❌ 失败</span></td>
+          <td>
+            <div class="actions">
+              <a class="btn btn-info" href="#">查看</a>
+              <a class="btn btn-warning" href="#">暂停</a>
+              <a class="btn btn-danger" href="#">删除</a>
+            </div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    <footer>数据来自演示环境，实际运行时将实时更新。</footer>
+  </main>
+</body>
+</html>

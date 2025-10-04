@@ -1,7 +1,21 @@
+from __future__ import annotations
+
+import os
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import scoped_session, sessionmaker, declarative_base
 
-DATABASE_URL = "sqlite:///data.db"
+
+def _resolve_database_url() -> str:
+    """Return the configured database URL with environment override support."""
+
+    override = os.getenv("DATABASE_URL")
+    if override:
+        return override
+    return "sqlite:///data.db"
+
+
+DATABASE_URL = _resolve_database_url()
 
 engine = create_engine(
     DATABASE_URL,
