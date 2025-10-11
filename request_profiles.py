@@ -19,14 +19,31 @@ class RequestProfile:
 
     def build_headers(self, url: str) -> dict[str, str]:
         parts = urlsplit(url)
+
+        scheme = parts.scheme or "https"
+        netloc = parts.netloc
+        path = parts.path or "/"
+
+        if not netloc and parts.path:
+            stripped = parts.path.lstrip("/")
+            head, _, tail = stripped.partition("/")
+            if head and "." in head:
+                netloc = head
+                path = "/" + tail if tail else "/"
+
+        hostname = parts.hostname or netloc
+
         mapping = {
-            "scheme": parts.scheme,
-            "netloc": parts.netloc,
-            "hostname": parts.hostname or parts.netloc,
+            "scheme": scheme,
+            "netloc": netloc,
+            "hostname": hostname,
             "url": url,
-            "path": parts.path or "/",
+            "path": path,
         }
-        referer = self.referer_template.format(**mapping)
+
+        referer = ""
+        if netloc:
+            referer = self.referer_template.format(**mapping)
         headers: dict[str, str] = {
             "User-Agent": self.user_agent,
             "Accept-Language": self.accept_language,
