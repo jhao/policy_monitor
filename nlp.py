@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from difflib import SequenceMatcher
 from functools import lru_cache
 from typing import Iterable
@@ -18,6 +19,39 @@ except ImportError:  # pragma: no cover - optional dependency
 
 LOGGER = logging.getLogger(__name__)
 _FALLBACK_NOTICE_EMITTED = False
+_MODEL_NAME = "all-MiniLM-L6-v2"
+_HF_ENDPOINT_ENV = "HF_ENDPOINT"
+_MIRROR_ENV = "POLICY_MONITOR_HF_MIRROR"
+_DEFAULT_MIRROR = "https://hf-mirror.com"
+
+
+def _load_sentence_transformer() -> SentenceTransformer:
+    """Instantiate the configured SentenceTransformer model."""
+
+    return SentenceTransformer(_MODEL_NAME)
+
+
+def _configure_hf_mirror_on_failure(exc: Exception) -> bool:
+    """Set a Hugging Face mirror endpoint if model download failed.
+
+    Returns ``True`` when a mirror endpoint was configured and the caller
+    should retry loading the model, otherwise ``False``.
+    """
+
+    if os.environ.get(_HF_ENDPOINT_ENV):
+        return False
+
+    mirror_endpoint = os.getenv(_MIRROR_ENV, _DEFAULT_MIRROR).strip()
+    if not mirror_endpoint:
+        return False
+
+    message = str(exc).lower()
+    if "huggingface.co" not in message and "connection" not in message:
+        return False
+
+    os.environ[_HF_ENDPOINT_ENV] = mirror_endpoint
+    LOGGER.info("Retrying SentenceTransformer download via mirror %s", mirror_endpoint)
+    return True
 
 
 @lru_cache(maxsize=1)
@@ -26,7 +60,16 @@ def get_model() -> SentenceTransformer | None:
 
     if SentenceTransformer is None:
         return None
-    return SentenceTransformer("all-MiniLM-L6-v2")
+    try:
+        return _load_sentence_transformer()
+    except Exception as exc:  # pragma: no cover - network dependent
+        LOGGER.warning("Failed to load SentenceTransformer model: %s", exc)
+        if _configure_hf_mirror_on_failure(exc):
+            try:
+                return _load_sentence_transformer()
+            except Exception as mirror_exc:  # pragma: no cover - network dependent
+                LOGGER.error("Failed to load model from mirror endpoint: %s", mirror_exc)
+        return None
 
 
 def cosine_similarity(vec_a: "np.ndarray", vec_b: "np.ndarray") -> float:

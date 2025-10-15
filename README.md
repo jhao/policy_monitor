@@ -86,6 +86,14 @@ flowchart LR
 
    如需启用语义匹配模型，确保能够安装 `sentence-transformers` 所需依赖（部分 Python 版本暂未提供预编译轮子）。
 
+   国内环境若无法直接访问 `https://huggingface.co`，可在运行前设置镜像端点，例如：
+
+   ```bash
+   export POLICY_MONITOR_HF_MIRROR=https://hf-mirror.com
+   ```
+
+   加载模型失败时应用会自动尝试使用上述镜像地址（默认即为 `https://hf-mirror.com`）并重试下载。
+
 2. **配置通知渠道**
 
    在环境变量或 `app.py` 中配置以下 SMTP 变量：
